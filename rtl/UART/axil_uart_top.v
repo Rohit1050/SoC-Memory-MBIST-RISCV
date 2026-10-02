@@ -1,119 +1,133 @@
 /* -----------------------------------------------------------------------------
- * Project        : AXI4 UART IP Core
- * File           : axi4_uart_top.v
- * Description    : Full AXI4 Slave UART Module (with burst support)
- *                  Replaces axi_uart_top.v (AXI4-Lite version).
- * ------------------------------------------------------------------------------
- * AXI4 additions over the AXI4-Lite version:
- *   Write channel : AWLEN, AWSIZE, AWBURST, AWLOCK, AWCACHE, AWPROT, AWQOS
- *                   WLAST
- *   Read  channel : ARLEN, ARSIZE, ARBURST, ARLOCK, ARCACHE, ARPROT, ARQOS
- *                   RLAST
- *   Burst support : INCR burst on both read and write channels.
- *                   Single-register slave: all burst beats map to the same
- *                   register address (simplest correct behaviour for a UART
- *                   peripheral whose registers are single-beat in nature).
- *                   WLAST / RLAST are tracked so the slave correctly completes
- *                   the handshake for multi-beat bursts from the master.
- * ------------------------------------------------------------------------------
+ * Project        : RISC-V SoC / MBIST  —  AXI4-Lite UART IP
+ * File           : axil_uart_top.v
+ * Module         : axil_uart_top
+ * Description    : AXI4-Lite Slave UART  —  dual-FSM (write / read) with
+ *                  FIFO-backed TX and RX paths and 16550-compatible register map.
+ *
+ * Memory-map     : UART base = 0x4000_0000, window = 4 KB
+ *                  Reached from axi_interconnect_wrap_4x7 master port m01
+ *                  through the AXI4-to-AXI4-Lite bridge.
+ *
+ * Interface      : AXI4-Lite (no burst channels).
+ *                    ADDR_WIDTH = 32   (matches crossbar ADDR_WIDTH)
+ *                    DATA_WIDTH = 32   (Lite-side; bridge handles 64→32 conversion)
+ *                    ID_WIDTH   = 4    (matches crossbar ID_WIDTH=4)
+ *
+ * Register map   :
+ *   Offset  Name          Access  Description
+ *   0x000   RBR           R       Receive  Buffer Register  (DLAB=0)
+ *   0x000   THR           W       Transmit Holding Register (DLAB=0)
+ *   0x004   IER           R/W     Interrupt Enable Register (DLAB=0)
+ *   0x008   BAUD_DIVISOR  R/W     Baud-rate Divisor        (DLAB=1 to write)
+ *   0x00C   LCR           R/W     Line Control Register
+ *   0x014   LSR           R       Line Status Register
+ *   others  —             —       SLVERR
+ *
+ * ⚠  Clock domain note
+ *   The module exposes two clock inputs:
+ *     fixed_clk_i : UART baud-clock domain (must be ≥16× baud rate).
+ *                   All sequential logic in this module is registered on this
+ *                   clock, including the AXI4-Lite channel registers.
+ *     axi_aclk_i  : AXI bus clock.  Currently unused internally — present to
+ *                   match the bridge's expected port list and to allow a future
+ *                   integrator to insert two-flop synchronizers between the AXI
+ *                   channel inputs and the fixed_clk_i domain.
+ *
+ *   CONSEQUENCE: If fixed_clk_i ≠ axi_aclk_i the AXI handshake signals
+ *   (AWVALID, WVALID, ARVALID, RREADY, BREADY) cross clock domains without
+ *   synchronizers inside this module.  The current design is safe only when
+ *   the two clocks are the same or are phase-locked.  A future CDC pass should
+ *   add two-flop synchronizers on all AXI input signals before moving to an
+ *   asynchronous multi-clock system.
+ *
+ * Derived from   : axi4_uart_top.v (full AXI4, rev 4.0)
+ *   Changes       : AXI4 burst channels removed (AWLEN/SIZE/BURST/LOCK/CACHE/
+ *                   PROT/QOS, WLAST, ARLEN/SIZE/BURST/LOCK/CACHE/PROT/QOS,
+ *                   RLAST).  Module name updated.  Defines file updated.
+ *                   Register map and FSM architecture preserved unchanged.
+ *
  * Revision History
- *  Revision   | Author      | Description
- *  1.0        | aruiz       | First IP version with Avalon-Bus interface
- *  2.0        | vkostalamp  | AXI-Bus porting and documentation
- *  2.1        | aruiz       | Code refactoring with asynchronous reset
- *  3.0        | aruiz       | Two clock domains integration
- *  4.0        | HC_CBP_095  | Full AXI4 upgrade (burst channels)
+ *  Rev | Author      | Description
+ *  1.0 | aruiz       | First IP (Avalon bus)
+ *  2.0 | vkostalamp  | AXI-Bus porting
+ *  2.1 | aruiz       | Asynchronous reset
+ *  3.0 | aruiz       | Two clock domains
+ *  4.0 | HC_CBP_095  | Full AXI4 burst version (axi4_uart_top.v)
+ *  5.0 | HC_CBP_095  | AXI4-Lite conversion (this file)
  * -----------------------------------------------------------------------------*/
 `timescale 1ns/1ps
 
 `default_nettype none
 
-`include "axi4_uart_defines.vh"
+`include "axil_uart_defines.vh"
 
 /*
-Title: axi4_uart_top
-Full AXI4 slave UART top-level.  Two decoupled FSMs handle the read and write
-channels independently.  Burst transactions (INCR) are accepted; every beat of
-a write burst is decoded against the address latched from AWADDR.  Every beat
-of a read burst returns data from the same register address.
-The actual UART datapath (uart_controller, rx-FIFO, tx-FIFO) is unchanged from
-the AXI4-Lite version.
+Title: axil_uart_top
+AXI4-Lite slave UART.  Two decoupled FSMs handle the write and read channels
+independently.  The actual UART datapath (uart_controller, RX-FIFO, TX-FIFO)
+is unchanged from the AXI4 version.
 */
-module axi4_uart_top (
-  // -----------------------------------------------------------------------
+module axil_uart_top (
+  // -------------------------------------------------------------------------
   // Clocks & reset
-  // -----------------------------------------------------------------------
-  input  wire        fixed_clk_i,   // UART clock domain (≥16× baud)
-  input  wire        axi_aclk_i,    // AXI bus clock
-  input  wire        axi_aresetn_i, // AXI active-low synchronous reset
+  //   See clock domain note in the file header above.
+  // -------------------------------------------------------------------------
+  input  wire        fixed_clk_i,   // UART clock domain (≥16× baud); all FFs here
+  input  wire        axi_aclk_i,    // AXI bus clock (present for port compatibility)
+  input  wire        axi_aresetn_i, // Active-low synchronous reset (sampled on fixed_clk_i)
 
-  // -----------------------------------------------------------------------
-  // AXI4 Write Address channel (AW)
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // AXI4-Lite Write Address channel (AW)
+  // -------------------------------------------------------------------------
   input  wire [`_AXI_UART_ID_WIDTH_-1:0]     axi_awid_i,
   input  wire [`_AXI_UART_ADDR_WIDTH_-1:0]   axi_awaddr_i,
-  input  wire [`_AXI_UART_LEN_WIDTH_-1:0]    axi_awlen_i,    // burst length (beats-1)
-  input  wire [`_AXI_UART_SIZE_WIDTH_-1:0]   axi_awsize_i,   // bytes per beat
-  input  wire [`_AXI_UART_BURST_WIDTH_-1:0]  axi_awburst_i,  // FIXED/INCR/WRAP
-  input  wire [`_AXI_UART_LOCK_WIDTH_-1:0]   axi_awlock_i,   // exclusive lock
-  input  wire [`_AXI_UART_CACHE_WIDTH_-1:0]  axi_awcache_i,  // memory attributes
-  input  wire [`_AXI_UART_PROT_WIDTH_-1:0]   axi_awprot_i,   // protection type
-  input  wire [`_AXI_UART_QOS_WIDTH_-1:0]    axi_awqos_i,    // QoS
   input  wire                                axi_awvalid_i,
   output wire                                axi_awready_o,
 
-  // -----------------------------------------------------------------------
-  // AXI4 Write Data channel (W)
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // AXI4-Lite Write Data channel (W)
+  // -------------------------------------------------------------------------
   input  wire [`_AXI_UART_DATA_WIDTH_-1:0]   axi_wdata_i,
   input  wire [`_AXI_UART_DATA_WIDTH_/8-1:0] axi_wstrb_i,
-  input  wire                                axi_wlast_i,   // last beat of burst
   input  wire                                axi_wvalid_i,
   output wire                                axi_wready_o,
 
-  // -----------------------------------------------------------------------
-  // AXI4 Write Response channel (B)
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // AXI4-Lite Write Response channel (B)
+  // -------------------------------------------------------------------------
   output wire [`_AXI_UART_ID_WIDTH_-1:0]     axi_bid_o,
   output wire [`_AXI_UART_RESP_WIDTH_-1:0]   axi_bresp_o,
   output wire                                axi_bvalid_o,
   input  wire                                axi_bready_i,
 
-  // -----------------------------------------------------------------------
-  // AXI4 Read Address channel (AR)
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // AXI4-Lite Read Address channel (AR)
+  // -------------------------------------------------------------------------
   input  wire [`_AXI_UART_ID_WIDTH_-1:0]     axi_arid_i,
   input  wire [`_AXI_UART_ADDR_WIDTH_-1:0]   axi_araddr_i,
-  input  wire [`_AXI_UART_LEN_WIDTH_-1:0]    axi_arlen_i,    // burst length (beats-1)
-  input  wire [`_AXI_UART_SIZE_WIDTH_-1:0]   axi_arsize_i,   // bytes per beat
-  input  wire [`_AXI_UART_BURST_WIDTH_-1:0]  axi_arburst_i,  // FIXED/INCR/WRAP
-  input  wire [`_AXI_UART_LOCK_WIDTH_-1:0]   axi_arlock_i,   // exclusive lock
-  input  wire [`_AXI_UART_CACHE_WIDTH_-1:0]  axi_arcache_i,  // memory attributes
-  input  wire [`_AXI_UART_PROT_WIDTH_-1:0]   axi_arprot_i,   // protection type
-  input  wire [`_AXI_UART_QOS_WIDTH_-1:0]    axi_arqos_i,    // QoS
   input  wire                                axi_arvalid_i,
   output wire                                axi_arready_o,
 
-  // -----------------------------------------------------------------------
-  // AXI4 Read Data channel (R)
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
+  // AXI4-Lite Read Data channel (R)
+  // -------------------------------------------------------------------------
   output wire [`_AXI_UART_ID_WIDTH_-1:0]     axi_rid_o,
   output wire [`_AXI_UART_DATA_WIDTH_-1:0]   axi_rdata_o,
   output wire [`_AXI_UART_RESP_WIDTH_-1:0]   axi_rresp_o,
-  output wire                                axi_rlast_o,    // last beat of read burst
   output wire                                axi_rvalid_o,
   input  wire                                axi_rready_i,
 
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   // UART interface
-  // -----------------------------------------------------------------------
+  // -------------------------------------------------------------------------
   output reg                                 read_interrupt_o,
   input  wire                                uart_rx_i,
   output wire                                uart_tx_o
 );
 
   // =========================================================================
-  // Local parameters derived from defines
+  // Local parameters
   // =========================================================================
   localparam BYTE             = 8;
   localparam AXI_DATA_WIDTH   = `_AXI_UART_DATA_WIDTH_;
@@ -121,19 +135,18 @@ module axi4_uart_top (
   localparam AXI_DIV_WIDTH    = `_AXI_UART_DIV_WIDTH_;
   localparam AXI_ID_WIDTH     = `_AXI_UART_ID_WIDTH_;
   localparam AXI_RESP_WIDTH   = `_AXI_UART_RESP_WIDTH_;
-  localparam AXI_LEN_WIDTH    = `_AXI_UART_LEN_WIDTH_;
   localparam AXI_FIFO_DEPTH   = `_AXI_UART_FIFO_DEPTH_;
   localparam AXI_FIFO_ADDR    = $clog2(AXI_FIFO_DEPTH);
   localparam AXI_BYTE_NUM     = AXI_DATA_WIDTH / BYTE;
   localparam AXI_LSB_WIDTH    = $clog2(AXI_BYTE_NUM); // byte-lane LSBs to strip
 
   // UART register map (word indices — compare addr[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
-  localparam UART_RBR                = `_UART_RBR_;
-  localparam UART_THR                = `_UART_THR_;
-  localparam UART_IER                = `_UART_IER_;
-  localparam UART_BAUD_DIVISOR       = `_UART_BAUD_DIVISOR_;
-  localparam UART_LCR                = `_UART_LCR_;
-  localparam UART_LSR                = `_UART_LSR_;
+  localparam UART_RBR          = `_UART_RBR_;
+  localparam UART_THR          = `_UART_THR_;
+  localparam UART_IER          = `_UART_IER_;
+  localparam UART_BAUD_DIVISOR = `_UART_BAUD_DIVISOR_;
+  localparam UART_LCR          = `_UART_LCR_;
+  localparam UART_LSR          = `_UART_LSR_;
 
   // LCR / LSR bit positions
   localparam UART_CONFIG_STOP_BITS   = `_UART_CONFIG_STOP_BITS_;
@@ -145,18 +158,18 @@ module axi4_uart_top (
   localparam UART_LSR_THRE           = `_UART_LSR_THRE_;
 
   // UART datapath
-  localparam DATA_WIDTH_UART         = `_DATA_WIDTH_UART_;
-  localparam UART_BAUDRATE_DIV_INIT  = `_UART_BAUDRATE_DIV_INIT_;
+  localparam DATA_WIDTH_UART        = `_DATA_WIDTH_UART_;
+  localparam UART_BAUDRATE_DIV_INIT = `_UART_BAUDRATE_DIV_INIT_;
 
   // =========================================================================
   // Internal UART configuration registers
   // =========================================================================
-  reg  [AXI_DATA_WIDTH-1:0]  uart_config_reg_int,  uart_config_reg_int_d;
+  reg  [AXI_DATA_WIDTH-1:0]  uart_config_reg_int,   uart_config_reg_int_d;
   reg  [AXI_DIV_WIDTH-1:0]   uart_baudrate_div_int, uart_baudrate_div_int_d;
   reg  [AXI_DIV_WIDTH-1:0]   baudrate_divisor_int,  baudrate_divisor_int_d;
-  reg                        uart_irq_en_int,       uart_irq_en_int_d;
+  reg                        uart_irq_en_int,        uart_irq_en_int_d;
 
-  wire uart_en_int            = 1'b1; // UART always enabled
+  wire uart_en_int            = 1'b1;
   wire uart_parity_en_int     = uart_config_reg_int[UART_CONFIG_PARITY_EN];
   wire uart_parity_mode_int   = uart_config_reg_int[UART_CONFIG_PARITY_MODE];
   wire uart_stop_bits_sel_int = uart_config_reg_int[UART_CONFIG_STOP_BITS];
@@ -181,11 +194,11 @@ module axi4_uart_top (
   reg                        rx_fifo_reset_int, rx_fifo_reset_int_d;
   reg                        rx_fifo_pull_int,  rx_fifo_pull_int_d;
 
-  reg                        tx_fifo_reset_int,    tx_fifo_reset_int_d;
-  reg                        tx_fifo_push_int,     tx_fifo_push_int_d;
-  reg  [DATA_WIDTH_UART-1:0] tx_fifo_data_in_int,  tx_fifo_data_in_int_d;
+  reg                        tx_fifo_reset_int,   tx_fifo_reset_int_d;
+  reg                        tx_fifo_push_int,    tx_fifo_push_int_d;
+  reg  [DATA_WIDTH_UART-1:0] tx_fifo_data_in_int, tx_fifo_data_in_int_d;
 
-  // LSR register (combinatorially assembled)
+  // LSR register — assembled combinatorially from FIFO status
   wire [AXI_DATA_WIDTH-1:0]  uart_lsr_reg_int;
 
   genvar I;
@@ -201,40 +214,35 @@ module axi4_uart_top (
   endgenerate
 
   // =========================================================================
-  // AXI4 Register declarations
+  // AXI4-Lite register declarations
   // =========================================================================
 
   // ---- Write Address channel ----
-  reg                        axi_awready,    axi_awready_d;
-  reg  [AXI_ID_WIDTH-1:0]    aw_id_lat,      aw_id_lat_d;    // latched AW ID
-  reg  [AXI_ADDR_WIDTH-1:0]  aw_addr_lat,    aw_addr_lat_d;  // latched AW addr
-  reg  [AXI_LEN_WIDTH-1:0]   aw_len_lat,     aw_len_lat_d;   // latched burst len
-  reg  [AXI_LEN_WIDTH-1:0]   aw_beat_cnt,    aw_beat_cnt_d;  // write beat counter
+  reg                        axi_awready,   axi_awready_d;
+  reg  [AXI_ID_WIDTH-1:0]    aw_id_lat,     aw_id_lat_d;   // latched AW ID
+  reg  [AXI_ADDR_WIDTH-1:0]  aw_addr_lat,   aw_addr_lat_d; // latched AW addr
 
   // ---- Write Data channel ----
-  reg                        axi_wready,     axi_wready_d;
+  reg                        axi_wready,    axi_wready_d;
 
   // ---- Write Response channel ----
-  reg  [AXI_ID_WIDTH-1:0]    axi_bid,        axi_bid_d;
-  reg  [AXI_RESP_WIDTH-1:0]  axi_bresp,      axi_bresp_d;
-  reg                        axi_bvalid,     axi_bvalid_d;
+  reg  [AXI_ID_WIDTH-1:0]    axi_bid,       axi_bid_d;
+  reg  [AXI_RESP_WIDTH-1:0]  axi_bresp,     axi_bresp_d;
+  reg                        axi_bvalid,    axi_bvalid_d;
 
   // ---- Read Address channel ----
-  reg                        axi_arready,    axi_arready_d;
-  reg  [AXI_ID_WIDTH-1:0]    ar_id_lat,      ar_id_lat_d;
-  reg  [AXI_ADDR_WIDTH-1:0]  ar_addr_lat,    ar_addr_lat_d;
-  reg  [AXI_LEN_WIDTH-1:0]   ar_len_lat,     ar_len_lat_d;   // latched burst len
-  reg  [AXI_LEN_WIDTH-1:0]   ar_beat_cnt,    ar_beat_cnt_d;  // read beat counter
+  reg                        axi_arready,   axi_arready_d;
+  reg  [AXI_ID_WIDTH-1:0]    ar_id_lat,     ar_id_lat_d;
+  reg  [AXI_ADDR_WIDTH-1:0]  ar_addr_lat,   ar_addr_lat_d;
 
   // ---- Read Data channel ----
-  reg  [AXI_ID_WIDTH-1:0]    axi_rid,        axi_rid_d;
-  reg  [AXI_DATA_WIDTH-1:0]  axi_rdata,      axi_rdata_d;
-  reg  [AXI_RESP_WIDTH-1:0]  axi_rresp,      axi_rresp_d;
-  reg                        axi_rlast,      axi_rlast_d;
-  reg                        axi_rvalid,     axi_rvalid_d;
+  reg  [AXI_ID_WIDTH-1:0]    axi_rid,       axi_rid_d;
+  reg  [AXI_DATA_WIDTH-1:0]  axi_rdata,     axi_rdata_d;
+  reg  [AXI_RESP_WIDTH-1:0]  axi_rresp,     axi_rresp_d;
+  reg                        axi_rvalid,    axi_rvalid_d;
 
   // =========================================================================
-  // AXI4 output assignments
+  // AXI4-Lite output assignments
   // =========================================================================
   assign axi_awready_o = axi_awready;
   assign axi_wready_o  = axi_wready;
@@ -245,26 +253,38 @@ module axi4_uart_top (
   assign axi_rid_o     = axi_rid;
   assign axi_rdata_o   = axi_rdata;
   assign axi_rresp_o   = axi_rresp;
-  assign axi_rlast_o   = axi_rlast;
   assign axi_rvalid_o  = axi_rvalid;
 
   // =========================================================================
-  // WRITE FSM — accepts full AXI4 burst writes
+  // WRITE FSM
+  //
+  // AXI4-Lite write transaction:
+  //   1. WR_IDLE : slave asserts AWREADY + WREADY when AWVALID arrives
+  //                (address and data channels may arrive simultaneously or
+  //                 address first; AXI4-Lite does not guarantee ordering)
+  //   2. WR_DATA : wait until both AWVALID+WVALID have been seen, then
+  //                decode the address, update the target register, and
+  //                move to WR_RESP
+  //   3. WR_RESP : hold BVALID until BREADY; return to WR_IDLE
+  //
+  // Note: AXI4-Lite has no burst channels — WLAST / RLAST do not exist.
   // =========================================================================
-  //
-  // State encoding
-  //   WR_IDLE  : waiting for AW handshake
-  //   WR_DATA  : accepting W-channel beats
-  //   WR_RESP  : sending B-channel response (wait for bready)
-  //
   localparam WR_IDLE = 2'b00;
   localparam WR_DATA = 2'b01;
   localparam WR_RESP = 2'b10;
   reg [1:0] wr_state, wr_state_d;
 
+  // Handshake latches: track whether AW and W have each been accepted
+  reg aw_done, aw_done_d;  // AW address has been latched
+  reg w_done,  w_done_d;   // W data has been latched
+
+  // Latch for the write data (needed when W arrives before the decode beat)
+  reg  [AXI_DATA_WIDTH-1:0]   aw_wdata_lat,  aw_wdata_lat_d;
+  reg  [AXI_DATA_WIDTH/8-1:0] aw_wstrb_lat,  aw_wstrb_lat_d;
+
   // ---- WRITE FSM : combinational ----
   always @(*) begin
-    // default: hold
+    // Default: hold all state
     wr_state_d              = wr_state;
     axi_awready_d           = 1'b0;
     axi_wready_d            = axi_wready;
@@ -273,8 +293,10 @@ module axi4_uart_top (
     axi_bvalid_d            = axi_bvalid;
     aw_id_lat_d             = aw_id_lat;
     aw_addr_lat_d           = aw_addr_lat;
-    aw_len_lat_d            = aw_len_lat;
-    aw_beat_cnt_d           = aw_beat_cnt;
+    aw_done_d               = aw_done;
+    w_done_d                = w_done;
+    aw_wdata_lat_d          = aw_wdata_lat;
+    aw_wstrb_lat_d          = aw_wstrb_lat;
     tx_fifo_push_int_d      = 1'b0;
     tx_fifo_data_in_int_d   = tx_fifo_data_in_int;
     tx_fifo_reset_int_d     = tx_fifo_reset_int;
@@ -284,73 +306,84 @@ module axi4_uart_top (
     uart_irq_en_int_d       = uart_irq_en_int;
 
     case (wr_state)
-      // -------------------------------------------------------------------
+      // ------------------------------------------------------------------
       WR_IDLE: begin
-        axi_bvalid_d  = 1'b0;
-        axi_wready_d  = 1'b0;
+        axi_bvalid_d = 1'b0;
+        aw_done_d    = 1'b0;
+        w_done_d     = 1'b0;
+
+        // Accept AW handshake
         if (axi_awvalid_i) begin
-          // Accept address — latch burst info
-          axi_awready_d   = 1'b1;
-          aw_id_lat_d     = axi_awid_i;
-          aw_addr_lat_d   = axi_awaddr_i;
-          aw_len_lat_d    = axi_awlen_i;
-          aw_beat_cnt_d   = {AXI_LEN_WIDTH{1'b0}};
-          axi_wready_d    = 1'b1;   // immediately ready for data
-          wr_state_d      = WR_DATA;
+          axi_awready_d = 1'b1;
+          aw_id_lat_d   = axi_awid_i;
+          aw_addr_lat_d = axi_awaddr_i;
+          aw_done_d     = 1'b1;
         end
+
+        // Accept W handshake simultaneously (AXI4-Lite allows both channels valid
+        // at once; we must accept both regardless of ordering)
+        if (axi_wvalid_i) begin
+          axi_wready_d   = 1'b1;
+          aw_wdata_lat_d = axi_wdata_i;
+          aw_wstrb_lat_d = axi_wstrb_i;
+          w_done_d       = 1'b1;
+        end
+
+        // Advance only when both channels have been accepted
+        if ((axi_awvalid_i || aw_done) && (axi_wvalid_i || w_done))
+          wr_state_d = WR_DATA;
       end
 
-      // -------------------------------------------------------------------
+      // ------------------------------------------------------------------
       WR_DATA: begin
-        axi_awready_d = 1'b0;  // address already accepted
+        // Both address and data are in the latches; decode and write.
+        axi_awready_d = 1'b0;
+        axi_wready_d  = 1'b0;
 
-        if (axi_wvalid_i && axi_wready) begin
-          // --- decode address and update register ---
-          case (aw_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+        case (aw_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
 
-            UART_THR: begin
-              if (!uart_dlab_int && !tx_fifo_full_int) begin
-                tx_fifo_push_int_d    = 1'b1;
-                tx_fifo_data_in_int_d = axi_wdata_i[DATA_WIDTH_UART-1:0];
-              end
+          UART_THR: begin
+            if (!uart_dlab_int && !tx_fifo_full_int) begin
+              tx_fifo_push_int_d    = 1'b1;
+              tx_fifo_data_in_int_d = aw_wdata_lat[DATA_WIDTH_UART-1:0];
             end
-
-            UART_IER: begin
-              if (!uart_dlab_int)
-                uart_irq_en_int_d = axi_wdata_i[0];
-            end
-
-            UART_BAUD_DIVISOR: begin
-              if (uart_dlab_int)
-                baudrate_divisor_int_d = axi_wdata_i[AXI_DIV_WIDTH-1:0];
-            end
-
-            UART_LCR: begin
-              uart_config_reg_int_d = axi_wdata_i;
-            end
-
-            default: ; // ignore writes to undefined registers (no hang)
-          endcase
-
-          // --- burst beat accounting ---
-          if (axi_wlast_i || (aw_beat_cnt == aw_len_lat)) begin
-            // Last beat received — send response
-            axi_wready_d      = 1'b0;
-            axi_bid_d         = aw_id_lat;
-            axi_bresp_d       = `AXI4_RESP_OKAY;
-            axi_bvalid_d      = 1'b1;
-            uart_baudrate_div_int_d = baudrate_divisor_int_d; // commit divisor
-            tx_fifo_reset_int_d = 1'b0;
-            wr_state_d        = WR_RESP;
-          end else begin
-            aw_beat_cnt_d = aw_beat_cnt + 1'b1;
+            axi_bresp_d = `AXIL_RESP_OKAY;
           end
-        end
+
+          UART_IER: begin
+            if (!uart_dlab_int)
+              uart_irq_en_int_d = aw_wdata_lat[0];
+            axi_bresp_d = `AXIL_RESP_OKAY;
+          end
+
+          UART_BAUD_DIVISOR: begin
+            if (uart_dlab_int)
+              baudrate_divisor_int_d = aw_wdata_lat[AXI_DIV_WIDTH-1:0];
+            axi_bresp_d = `AXIL_RESP_OKAY;
+          end
+
+          UART_LCR: begin
+            uart_config_reg_int_d = aw_wdata_lat;
+            axi_bresp_d           = `AXIL_RESP_OKAY;
+          end
+
+          default: begin
+            // Undefined offset: respond with SLVERR (no state change)
+            axi_bresp_d = `AXIL_RESP_SLVERR;
+          end
+        endcase
+
+        // Commit baud-rate divisor on any write (harmless if DLAB was clear)
+        uart_baudrate_div_int_d = baudrate_divisor_int_d;
+        tx_fifo_reset_int_d     = 1'b0;
+
+        axi_bid_d    = aw_id_lat;
+        axi_bvalid_d = 1'b1;
+        wr_state_d   = WR_RESP;
       end
 
-      // -------------------------------------------------------------------
+      // ------------------------------------------------------------------
       WR_RESP: begin
-        // Hold BVALID until master acknowledges
         if (axi_bready_i) begin
           axi_bvalid_d = 1'b0;
           axi_bid_d    = {AXI_ID_WIDTH{1'b0}};
@@ -368,11 +401,13 @@ module axi4_uart_top (
         baudrate_divisor_int_d  = UART_BAUDRATE_DIV_INIT[AXI_DIV_WIDTH-1:0];
         uart_config_reg_int_d   = {AXI_DATA_WIDTH{1'b0}};
         uart_irq_en_int_d       = 1'b0;
+        aw_done_d               = 1'b0;
+        w_done_d                = 1'b0;
       end
     endcase
   end
 
-  // ---- WRITE FSM : sequential (fixed_clk domain for UART coherence) ----
+  // ---- WRITE FSM : sequential (fixed_clk_i domain) ----
   always @(posedge fixed_clk_i, negedge axi_aresetn_i) begin
     if (!axi_aresetn_i) begin
       wr_state              <= WR_IDLE;
@@ -383,8 +418,10 @@ module axi4_uart_top (
       axi_bvalid            <= 1'b0;
       aw_id_lat             <= {AXI_ID_WIDTH{1'b0}};
       aw_addr_lat           <= {AXI_ADDR_WIDTH{1'b0}};
-      aw_len_lat            <= {AXI_LEN_WIDTH{1'b0}};
-      aw_beat_cnt           <= {AXI_LEN_WIDTH{1'b0}};
+      aw_done               <= 1'b0;
+      w_done                <= 1'b0;
+      aw_wdata_lat          <= {AXI_DATA_WIDTH{1'b0}};
+      aw_wstrb_lat          <= {(AXI_DATA_WIDTH/8){1'b0}};
       tx_fifo_reset_int     <= 1'b1;
       tx_fifo_push_int      <= 1'b0;
       tx_fifo_data_in_int   <= {DATA_WIDTH_UART{1'b0}};
@@ -401,8 +438,10 @@ module axi4_uart_top (
       axi_bvalid            <= axi_bvalid_d;
       aw_id_lat             <= aw_id_lat_d;
       aw_addr_lat           <= aw_addr_lat_d;
-      aw_len_lat            <= aw_len_lat_d;
-      aw_beat_cnt           <= aw_beat_cnt_d;
+      aw_done               <= aw_done_d;
+      w_done                <= w_done_d;
+      aw_wdata_lat          <= aw_wdata_lat_d;
+      aw_wstrb_lat          <= aw_wstrb_lat_d;
       tx_fifo_reset_int     <= tx_fifo_reset_int_d;
       tx_fifo_push_int      <= tx_fifo_push_int_d;
       tx_fifo_data_in_int   <= tx_fifo_data_in_int_d;
@@ -414,13 +453,16 @@ module axi4_uart_top (
   end
 
   // =========================================================================
-  // READ FSM — accepts full AXI4 burst reads
+  // READ FSM
+  //
+  // AXI4-Lite read transaction:
+  //   1. RD_IDLE : slave asserts ARREADY when ARVALID arrives; latches address
+  //   2. RD_DATA : decode address, present RDATA + RVALID; wait for RREADY
+  //   3. Return to RD_IDLE
+  //
+  // Note: AXI4-Lite has no RLAST — the single-beat transaction completes when
+  // RVALID & RREADY are both asserted.
   // =========================================================================
-  //
-  // State encoding
-  //   RD_IDLE  : waiting for AR handshake
-  //   RD_DATA  : sending R-channel beats
-  //
   localparam RD_IDLE = 2'b00;
   localparam RD_DATA = 2'b01;
   reg [1:0] rd_state, rd_state_d;
@@ -432,83 +474,79 @@ module axi4_uart_top (
     axi_rid_d           = axi_rid;
     axi_rdata_d         = axi_rdata;
     axi_rresp_d         = axi_rresp;
-    axi_rlast_d         = 1'b0;
     axi_rvalid_d        = axi_rvalid;
     ar_id_lat_d         = ar_id_lat;
     ar_addr_lat_d       = ar_addr_lat;
-    ar_len_lat_d        = ar_len_lat;
-    ar_beat_cnt_d       = ar_beat_cnt;
     rx_fifo_pull_int_d  = 1'b0;
     rx_fifo_reset_int_d = rx_fifo_reset_int;
 
     case (rd_state)
-      // -------------------------------------------------------------------
+      // ------------------------------------------------------------------
       RD_IDLE: begin
         axi_rvalid_d = 1'b0;
         if (axi_arvalid_i) begin
-          // Accept address — latch burst info
-          axi_arready_d  = 1'b1;
-          ar_id_lat_d    = axi_arid_i;
-          ar_addr_lat_d  = axi_araddr_i;
-          ar_len_lat_d   = axi_arlen_i;
-          ar_beat_cnt_d  = {AXI_LEN_WIDTH{1'b0}};
-          rd_state_d     = RD_DATA;
+          axi_arready_d = 1'b1;
+          ar_id_lat_d   = axi_arid_i;
+          ar_addr_lat_d = axi_araddr_i;
+          rd_state_d    = RD_DATA;
         end
       end
 
-      // -------------------------------------------------------------------
+      // ------------------------------------------------------------------
       RD_DATA: begin
         axi_arready_d = 1'b0;
 
+        // Present data as long as master has not yet accepted (or is accepting now)
         if (!axi_rvalid || axi_rready_i) begin
-          // --- decode read address ---
           case (ar_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+
             UART_RBR: begin
               if (!uart_dlab_int) begin
-                axi_rdata_d        = {{(AXI_DATA_WIDTH-DATA_WIDTH_UART){1'b0}}, rx_fifo_data_out_int};
+                axi_rdata_d        = {{(AXI_DATA_WIDTH-DATA_WIDTH_UART){1'b0}},
+                                       rx_fifo_data_out_int};
                 rx_fifo_pull_int_d = 1'b1;
               end else begin
-                axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
+                // DLAB=1: RBR address maps to BAUD_DIVISOR read
+                axi_rdata_d = {{(AXI_DATA_WIDTH-AXI_DIV_WIDTH){1'b0}},
+                                uart_baudrate_div_int};
               end
-              axi_rresp_d  = `AXI4_RESP_OKAY;
+              axi_rresp_d = `AXIL_RESP_OKAY;
             end
 
             UART_IER: begin
-              axi_rdata_d  = {{(AXI_DATA_WIDTH-1){1'b0}}, uart_irq_en_int};
-              axi_rresp_d  = `AXI4_RESP_OKAY;
+              axi_rdata_d = {{(AXI_DATA_WIDTH-1){1'b0}}, uart_irq_en_int};
+              axi_rresp_d = `AXIL_RESP_OKAY;
             end
 
             UART_BAUD_DIVISOR: begin
-              axi_rdata_d  = {{(AXI_DATA_WIDTH-AXI_DIV_WIDTH){1'b0}}, uart_baudrate_div_int};
-              axi_rresp_d  = `AXI4_RESP_OKAY;
+              axi_rdata_d = {{(AXI_DATA_WIDTH-AXI_DIV_WIDTH){1'b0}},
+                              uart_baudrate_div_int};
+              axi_rresp_d = `AXIL_RESP_OKAY;
             end
 
             UART_LCR: begin
-              axi_rdata_d  = uart_config_reg_int;
-              axi_rresp_d  = `AXI4_RESP_OKAY;
+              axi_rdata_d = uart_config_reg_int;
+              axi_rresp_d = `AXIL_RESP_OKAY;
             end
 
             UART_LSR: begin
-              axi_rdata_d  = uart_lsr_reg_int;
-              axi_rresp_d  = `AXI4_RESP_OKAY;
+              axi_rdata_d = uart_lsr_reg_int;
+              axi_rresp_d = `AXIL_RESP_OKAY;
             end
 
             default: begin
-              axi_rdata_d  = {AXI_DATA_WIDTH{1'b0}};
-              axi_rresp_d  = `AXI4_RESP_SLVERR; // undefined register
+              axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
+              axi_rresp_d = `AXIL_RESP_SLVERR; // undefined register in window
             end
           endcase
 
           axi_rid_d    = ar_id_lat;
           axi_rvalid_d = 1'b1;
 
-          // --- burst beat accounting ---
-          if (ar_beat_cnt == ar_len_lat) begin
-            axi_rlast_d   = 1'b1;           // mark last beat
+          // Single-beat AXI4-Lite: return to IDLE after presenting data
+          if (axi_rready_i) begin
             rx_fifo_reset_int_d = 1'b0;
-            rd_state_d    = RD_IDLE;
-          end else begin
-            ar_beat_cnt_d = ar_beat_cnt + 1'b1;
+            rd_state_d          = RD_IDLE;
           end
         end
       end
@@ -517,14 +555,13 @@ module axi4_uart_top (
         rd_state_d          = RD_IDLE;
         axi_arready_d       = 1'b0;
         axi_rvalid_d        = 1'b0;
-        axi_rlast_d         = 1'b0;
         rx_fifo_reset_int_d = 1'b1;
         rx_fifo_pull_int_d  = 1'b0;
       end
     endcase
   end
 
-  // ---- READ FSM : sequential (fixed_clk domain) ----
+  // ---- READ FSM : sequential (fixed_clk_i domain) ----
   always @(posedge fixed_clk_i, negedge axi_aresetn_i) begin
     if (!axi_aresetn_i) begin
       rd_state          <= RD_IDLE;
@@ -532,12 +569,9 @@ module axi4_uart_top (
       axi_rid           <= {AXI_ID_WIDTH{1'b0}};
       axi_rdata         <= {AXI_DATA_WIDTH{1'b0}};
       axi_rresp         <= 2'b0;
-      axi_rlast         <= 1'b0;
       axi_rvalid        <= 1'b0;
       ar_id_lat         <= {AXI_ID_WIDTH{1'b0}};
       ar_addr_lat       <= {AXI_ADDR_WIDTH{1'b0}};
-      ar_len_lat        <= {AXI_LEN_WIDTH{1'b0}};
-      ar_beat_cnt       <= {AXI_LEN_WIDTH{1'b0}};
       rx_fifo_reset_int <= 1'b1;
       rx_fifo_pull_int  <= 1'b0;
     end else begin
@@ -546,19 +580,17 @@ module axi4_uart_top (
       axi_rid           <= axi_rid_d;
       axi_rdata         <= axi_rdata_d;
       axi_rresp         <= axi_rresp_d;
-      axi_rlast         <= axi_rlast_d;
       axi_rvalid        <= axi_rvalid_d;
       ar_id_lat         <= ar_id_lat_d;
       ar_addr_lat       <= ar_addr_lat_d;
-      ar_len_lat        <= ar_len_lat_d;
-      ar_beat_cnt       <= ar_beat_cnt_d;
       rx_fifo_reset_int <= rx_fifo_reset_int_d;
       rx_fifo_pull_int  <= rx_fifo_pull_int_d;
     end
   end
 
   // =========================================================================
-  // Read interrupt generation
+  // Read-interrupt generation
+  //   Asserted whenever the RX FIFO is non-empty AND IER[0] is set.
   // =========================================================================
   always @(posedge fixed_clk_i, negedge axi_aresetn_i) begin
     if (!axi_aresetn_i)
@@ -604,7 +636,7 @@ module axi4_uart_top (
       .FIFO_SIZE    (AXI_FIFO_DEPTH),
       .DATA_SIZE    (DATA_WIDTH_UART),
       .INDEX_LENGTH (AXI_FIFO_ADDR),
-      .PORT_EN      (3'b000)  // [load | full | available_space] — only space needed
+      .PORT_EN      (3'b000)  // [load | full | available_space] — only space used
     )
     axi_internal_fifo_rx_inst (
       .clk_i   (fixed_clk_i),
