@@ -169,18 +169,110 @@ The simpler placeholder is superseded by this table.
 
 ---
 
-## 4. Verification Notes
+### 3.4 Watchdog Timer — `axil_wdt_top`
 
-See `tb/uart/tb_axil_uart_top.v` for the UART unit-level testbench.
-The shared AXI4-Lite BFM master is in `tb/common/axil_bfm_master.v`.
+**File:** `rtl/watchdog_timer/axil_wdt_top.v`  
+**Base address:** `0x4000_5000`  
+**Window:** 4 KB (`0x4000_5000` – `0x4000_5FFF`)  
+**Crossbar port:** `m06` on `axi_interconnect_wrap_4x7` (via AXI4-to-AXI4-Lite bridge)  
+**Interface:** AXI4-Lite (`DATA_WIDTH=32`, `ADDR_WIDTH=32`, `ID_WIDTH=4`)  
 
-Coverage targets:
-- Each register's read/write at its correct offset
-- DLAB-gated access (baud divisor read/write, RBR suppression)
-- TX FIFO full edge case (write to full FIFO → data dropped, no hang)
-- RX data arrival → interrupt assertion → interrupt clear on RBR read
-- SLVERR response on undefined offsets within the 4 KB window
+#### 3.4.1 Register Map
+
+All offsets are relative to base address `0x4000_5000`. All registers are 32-bit aligned.
+
+| Offset  | Word idx | Register          | Access | Reset | Description                                                                |
+|---------|----------|-------------------|--------|-------|----------------------------------------------------------------------------|
+| `0x000` | `4'h0`   | `wdg_enable`      | R/W    | 0x0   | Master enable. Bit 0 enables the countdown.                                |
+| `0x004` | `4'h1`   | `wdg_load`        | R/W    | 0x0   | Timeout and reload value in clock cycles.                                  |
+| `0x008` | `4'h2`   | `wdg_kick`        | W      | —     | Pet watchdog. Writing any value reloads `wdg_count` with `wdg_load`. Reads return 0. |
+| `0x00C` | `4'h3`   | `wdg_count`       | RO     | 0x0   | Current countdown value (diagnostic read). Writes return SLVERR.            |
+| `0x010` | `4'h4`   | `wdg_status`      | R/W1C  | 0x0   | Bit 0: `timeout_occurred` — latched across warm reset; write 1 to clear.   |
+| `0x014` | `4'h5`   | `wdg_pretimeout`  | R/W    | 0x0   | Early-warning threshold; asserts `wdg_irq_pretimeout` when count <= val.   |
+| `0x018`+| —        | *(undefined)*     | —      | —     | All other offsets within the 4 KB window return SLVERR.                   |
+
+#### 3.4.2 Non-Bus Signals
+
+| Signal                 | Direction | Width | Destination           | Description                                                        |
+|------------------------|-----------|-------|-----------------------|--------------------------------------------------------------------|
+| `wdg_timeout_o`        | Output    | 1     | External Reset Logic  | Asserted on countdown expiry; drives system reset via `rst_l`.      |
+| `wdg_irq_pretimeout_o` | Output    | 1     | PIC (`extintsrc_req`) | Early-warning interrupt prior to timeout expiry.                   |
+| `timeout_occurred_o`   | Output    | 1     | Debug / Diagnostics   | Direct status tap of `timeout_occurred` flag.                      |
+
+#### 3.4.3 Reset and Post-Mortem Architecture
+
+The Watchdog Timer uses a dual-reset architecture:
+- **`por_rstn_i`** (Power-On Reset / Cold Reset): Resets the sticky `timeout_occurred` status bit to 0.
+- **`axi_aresetn_i`** (System / Warm Reset): Resets the FSMs, `wdg_enable`, `wdg_load`, and `wdg_count`. The `timeout_occurred` flag is intentionally preserved across `axi_aresetn_i` assertions. When `wdg_timeout_o` triggers external reset logic, the core reboots, firmware reads `wdg_status[0] == 1`, identifies a watchdog recovery event, and writes 1 to clear the status bit (W1C).
 
 ---
 
-*Document revision: 1.0 — 2026-10-02*
+### 3.5 ECC Monitor — `axil_ecc_monitor_top`
+
+**File:** `rtl/ecc_monitor/axil_ecc_monitor_top.v`  
+**Base address:** `0x4000_4000`  
+**Window:** 4 KB (`0x4000_4000` – `0x4000_4FFF`)  
+**Crossbar port:** `m05` on `axi_interconnect_wrap_4x7` (via AXI4-to-AXI4-Lite bridge)  
+**Interface:** AXI4-Lite (`DATA_WIDTH=32`, `ADDR_WIDTH=32`, `ID_WIDTH=4`)  
+
+#### 3.5.1 Register Map
+
+| Offset  | Word idx | Register                | Access | Reset | Description                                                         |
+|---------|----------|-------------------------|--------|-------|---------------------------------------------------------------------|
+| `0x000` | `3'h0`   | `ecc_mon_enable`        | R/W    | 0x0   | Master enable bit.                                                  |
+| `0x004` | `3'h1`   | `ecc_mon_shadow_count`  | R/W    | 0x0   | 27-bit firmware mirror of core CSR `mdccmect.count`.               |
+| `0x008` | `3'h2`   | `ecc_mon_shadow_thresh` | R/W    | 0x0   | 5-bit firmware mirror of core CSR `mdccmect.thresh`.                |
+| `0x00C` | `3'h3`   | `ecc_mon_event`         | W1C    | 0x0   | FW writes 1 to signal correctable ISR fired; triggers correlation. |
+| `0x010` | `3'h4`   | `ecc_mon_suspect_addr`  | RO     | 0x0   | MBIST window active at last correlated event.                      |
+| `0x014` | `3'h5`   | `ecc_mon_status`        | RO     | 0x0   | Bit 0: `correctable_seen`; Bit 1: `mbist_correlated`.              |
+| `0x018`+| —        | *(undefined)*           | —      | —     | All other offsets in 4 KB window return SLVERR.                    |
+
+---
+
+### 3.6 MBIST Controller — `axil_mbist_ctrl_top`
+
+**Files:** `rtl/mbist_controller/axil_mbist_ctrl_top.v`, `mbist_algo_engine.v`, `mbist_dma_master.v`, `axil_mbist_defines.vh`  
+**Base address:** `0x4000_3000`  
+**Window:** 4 KB (`0x4000_3000` – `0x4000_3FFF`)  
+**Crossbar ports:** Slave CSR `m04` (AXI4-Lite via bridge); Master DMA port `s03` (64-bit full AXI4 to DCCM)  
+**Interface:** Dual-personality: 32-bit AXI4-Lite slave + 64-bit AXI4 master  
+
+#### 3.6.1 Register Map
+
+| Offset  | Word idx | Register            | Access | Reset        | Description                                                             |
+|---------|----------|---------------------|--------|--------------|-------------------------------------------------------------------------|
+| `0x000` | `4'h0`   | `mbist_start`       | W      | —            | Write 1 to launch self-test scan (auto-clears).                         |
+| `0x004` | `4'h1`   | `mbist_algo_sel`    | R/W    | `2'b01`      | 00 = Checkerboard, 01 = March C-.                                       |
+| `0x008` | `4'h2`   | `mbist_addr_start`  | R/W    | `0x00080000` | Start address of DCCM test region (64-bit aligned).                     |
+| `0x00C` | `4'h3`   | `mbist_addr_end`    | R/W    | `0x0009FFF8` | End address of DCCM test region (64-bit aligned).                       |
+| `0x010` | `4'h4`   | `mbist_busy`        | RO     | 0x0          | Asserted while self-test is actively executing.                         |
+| `0x014` | `4'h5`   | `mbist_done`        | RO/W1C | 0x0          | Asserted on scan completion; cleared on new start or writing 1.         |
+| `0x018` | `4'h6`   | `mbist_pass_fail`   | RO     | 0x0          | 0 = PASS, 1 = Directly-detected fault present (SLVERR or data mismatch).|
+| `0x01C` | `4'h7`   | `mbist_fault_addr`  | RO     | 0x0          | Address of the first directly-detected fault.                           |
+| `0x020` | `4'h8`   | `mbist_fault_count` | RO     | 0x0          | 16-bit count of directly-detected faults.                               |
+| `0x024`+| —        | *(undefined)*       | —      | —            | All other offsets in 4 KB window return SLVERR.                         |
+
+#### 3.6.2 Sideband Signals
+
+| Signal                   | Direction | Width | Destination            | Description                                              |
+|--------------------------|-----------|-------|------------------------|----------------------------------------------------------|
+| `mbist_active_o`         | Output    | 1     | ECC Monitor, WDT       | Asserted during active scan for ECC correlation.         |
+| `mbist_fault_addr_tap_o` | Output    | 32    | ECC Monitor            | Real-time test window tap latched upon correctable error.|
+| `mbist_irq_done_o`       | Output    | 1     | PIC (`extintsrc_req`)  | 1-cycle interrupt pulse on scan completion.              |
+| `timer_tick_i`           | Input     | 1     | System Timer           | External auto-trigger pulse to start scan.               |
+
+---
+
+## 4. Verification Notes
+
+- **UART:** `tb/uart/tb_axil_uart_top.v` (10 test cases)
+- **ECC Monitor:** `tb/ecc_monitor/tb_axil_ecc_monitor_top.v` (15 test cases)
+- **Watchdog Timer:** `tb/watchdog_timer/tb_axil_wdt_top.v` (12 test cases)
+- **MBIST Controller:** `tb/mbist_controller/tb_axil_mbist_ctrl_top.v` (9 test cases)
+- Shared AXI4-Lite BFM master: `tb/common/axil_bfm_master.v`
+
+---
+
+*Document revision: 1.2 — 2026-10-02*
+
+
