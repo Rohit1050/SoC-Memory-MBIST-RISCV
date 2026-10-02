@@ -71,29 +71,10 @@
 `default_nettype none
 
 // ============================================================================
-// Local defines
-//   Embedded here (no separate .vh) because this IP has no sub-modules.
-//   Naming convention mirrors axil_uart_defines.vh: _AXIL_ECC_xxx_ pattern.
+// Local defines include
 // ============================================================================
-`define _AXIL_ECC_DATA_WIDTH_  32
-`define _AXIL_ECC_ADDR_WIDTH_  32
-`define _AXIL_ECC_ID_WIDTH_     4
-`define _AXIL_ECC_RESP_WIDTH_   2
+`include "axil_ecc_monitor_defines.vh"
 
-// AXI4-Lite response codes (shared with UART defines but re-declared locally)
-`define AXIL_ECC_RESP_OKAY    2'b00
-`define AXIL_ECC_RESP_SLVERR  2'b10
-
-// Register word indices: addr[ADDR_WIDTH-1 : 2]  (byte_addr >> 2)
-// Byte offset → word index mapping:
-//   0x00 → 3'h0   0x04 → 3'h1   0x08 → 3'h2
-//   0x0C → 3'h3   0x10 → 3'h4   0x14 → 3'h5
-`define ECC_REG_ENABLE        3'h0
-`define ECC_REG_SHADOW_COUNT  3'h1
-`define ECC_REG_SHADOW_THRESH 3'h2
-`define ECC_REG_EVENT         3'h3
-`define ECC_REG_SUSPECT_ADDR  3'h4
-`define ECC_REG_STATUS        3'h5
 
 // ============================================================================
 // Module declaration
@@ -222,6 +203,10 @@ module axil_ecc_monitor_top (
   reg  [1:0]                          axi_bresp,     axi_bresp_d;
   reg                                 axi_bvalid,    axi_bvalid_d;
 
+  // Window check: either relative (prefix 0x00000) or absolute (prefix 0x40004)
+  wire aw_addr_in_window = (aw_addr_lat[AXI_ADDR_WIDTH-1:12] == `ECC_BASE_PREFIX) ||
+                           (aw_addr_lat[AXI_ADDR_WIDTH-1:12] == 20'h00000);
+
   // ---- WRITE FSM : combinational next-state logic ----
   always @(*) begin
     // --- defaults: hold everything ---
@@ -281,73 +266,77 @@ module axil_ecc_monitor_top (
         axi_awready_d = 1'b0;
         axi_wready_d  = 1'b0;
 
-        case (aw_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+        if (aw_addr_in_window) begin
+          case (aw_addr_lat[11 : AXI_LSB_WIDTH])
 
-          // ----------------------------------------------------------------
-          // 0x00 : ecc_mon_enable  (1-bit R/W)
-          // ----------------------------------------------------------------
-          `ECC_REG_ENABLE: begin
-            ecc_mon_enable_d = aw_wdata_lat[0];
-            axi_bresp_d      = `AXIL_ECC_RESP_OKAY;
-          end
-
-          // ----------------------------------------------------------------
-          // 0x04 : ecc_mon_shadow_count  (27-bit R/W)
-          // ----------------------------------------------------------------
-          `ECC_REG_SHADOW_COUNT: begin
-            ecc_mon_shadow_count_d = aw_wdata_lat[26:0];
-            axi_bresp_d            = `AXIL_ECC_RESP_OKAY;
-          end
-
-          // ----------------------------------------------------------------
-          // 0x08 : ecc_mon_shadow_thresh  (5-bit R/W)
-          // ----------------------------------------------------------------
-          `ECC_REG_SHADOW_THRESH: begin
-            ecc_mon_shadow_thresh_d = aw_wdata_lat[4:0];
-            axi_bresp_d             = `AXIL_ECC_RESP_OKAY;
-          end
-
-          // ----------------------------------------------------------------
-          // 0x0C : ecc_mon_event  (W1C)
-          //   Writing bit[0]=1 with enable=1 triggers correlation.
-          //   The register has no stored state and always reads 0.
-          //   Bus completes with OKAY regardless of enable or data value.
-          // ----------------------------------------------------------------
-          `ECC_REG_EVENT: begin
-            if (aw_wdata_lat[0] && ecc_mon_enable) begin
-              correctable_seen_d = 1'b1;
-              if (mbist_active_i) begin
-                ecc_mon_suspect_addr_d = mbist_fault_addr_tap_i;
-                mbist_correlated_d     = 1'b1;
-              end
+            // ----------------------------------------------------------------
+            // 0x00 : ecc_mon_enable  (1-bit R/W)
+            // ----------------------------------------------------------------
+            `ECC_REG_ENABLE: begin
+              ecc_mon_enable_d = aw_wdata_lat[0];
+              axi_bresp_d      = `AXIL_ECC_RESP_OKAY;
             end
-            // If ecc_mon_enable=0: write accepted, OKAY, no state change.
-            axi_bresp_d = `AXIL_ECC_RESP_OKAY;
-          end
 
-          // ----------------------------------------------------------------
-          // 0x10 : ecc_mon_suspect_addr  (RO — firmware may not write)
-          // ----------------------------------------------------------------
-          `ECC_REG_SUSPECT_ADDR: begin
-            axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
-          end
+            // ----------------------------------------------------------------
+            // 0x04 : ecc_mon_shadow_count  (27-bit R/W)
+            // ----------------------------------------------------------------
+            `ECC_REG_SHADOW_COUNT: begin
+              ecc_mon_shadow_count_d = aw_wdata_lat[26:0];
+              axi_bresp_d            = `AXIL_ECC_RESP_OKAY;
+            end
 
-          // ----------------------------------------------------------------
-          // 0x14 : ecc_mon_status  (RO — firmware may not write)
-          // ----------------------------------------------------------------
-          `ECC_REG_STATUS: begin
-            axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
-          end
+            // ----------------------------------------------------------------
+            // 0x08 : ecc_mon_shadow_thresh  (5-bit R/W)
+            // ----------------------------------------------------------------
+            `ECC_REG_SHADOW_THRESH: begin
+              ecc_mon_shadow_thresh_d = aw_wdata_lat[4:0];
+              axi_bresp_d             = `AXIL_ECC_RESP_OKAY;
+            end
 
-          // ----------------------------------------------------------------
-          // All other byte offsets in the 4 KB window → SLVERR
-          // (covers 0x18 … 0xFFC, the entire gap past the last register)
-          // ----------------------------------------------------------------
-          default: begin
-            axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
-          end
+            // ----------------------------------------------------------------
+            // 0x0C : ecc_mon_event  (W1C)
+            //   Writing bit[0]=1 with enable=1 triggers correlation.
+            //   The register has no stored state and always reads 0.
+            //   Bus completes with OKAY regardless of enable or data value.
+            // ----------------------------------------------------------------
+            `ECC_REG_EVENT: begin
+              if (aw_wdata_lat[0] && ecc_mon_enable) begin
+                correctable_seen_d = 1'b1;
+                if (mbist_active_i) begin
+                  ecc_mon_suspect_addr_d = mbist_fault_addr_tap_i;
+                  mbist_correlated_d     = 1'b1;
+                end
+              end
+              // If ecc_mon_enable=0: write accepted, OKAY, no state change.
+              axi_bresp_d = `AXIL_ECC_RESP_OKAY;
+            end
 
-        endcase
+            // ----------------------------------------------------------------
+            // 0x10 : ecc_mon_suspect_addr  (RO — firmware may not write)
+            // ----------------------------------------------------------------
+            `ECC_REG_SUSPECT_ADDR: begin
+              axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
+            end
+
+            // ----------------------------------------------------------------
+            // 0x14 : ecc_mon_status  (RO — firmware may not write)
+            // ----------------------------------------------------------------
+            `ECC_REG_STATUS: begin
+              axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
+            end
+
+            // ----------------------------------------------------------------
+            // All other byte offsets in the 4 KB window → SLVERR
+            // (covers 0x18 … 0xFFC, the entire gap past the last register)
+            // ----------------------------------------------------------------
+            default: begin
+              axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
+            end
+
+          endcase
+        end else begin
+          axi_bresp_d = `AXIL_ECC_RESP_SLVERR;
+        end
 
         axi_bid_d    = aw_id_lat;
         axi_bvalid_d = 1'b1;
@@ -445,6 +434,9 @@ module axil_ecc_monitor_top (
   reg  [1:0]                          axi_rresp,     axi_rresp_d;
   reg                                 axi_rvalid,    axi_rvalid_d;
 
+  wire ar_addr_in_window = (ar_addr_lat[AXI_ADDR_WIDTH-1:12] == `ECC_BASE_PREFIX) ||
+                           (ar_addr_lat[AXI_ADDR_WIDTH-1:12] == 20'h00000);
+
   // ---- READ FSM : combinational ----
   always @(*) begin
     // --- defaults: hold ---
@@ -477,55 +469,60 @@ module axil_ecc_monitor_top (
         // Present data whenever RVALID is not yet asserted or master is
         // accepting this beat (avoids re-muxing if master stalls RREADY).
         if (!axi_rvalid || axi_rready_i) begin
-          case (ar_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+          if (ar_addr_in_window) begin
+            case (ar_addr_lat[11 : AXI_LSB_WIDTH])
 
-            // 0x00 : ecc_mon_enable
-            `ECC_REG_ENABLE: begin
-              axi_rdata_d = {{(AXI_DATA_WIDTH-1){1'b0}}, ecc_mon_enable};
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x00 : ecc_mon_enable
+              `ECC_REG_ENABLE: begin
+                axi_rdata_d = {{(AXI_DATA_WIDTH-1){1'b0}}, ecc_mon_enable};
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // 0x04 : ecc_mon_shadow_count
-            `ECC_REG_SHADOW_COUNT: begin
-              axi_rdata_d = {{(AXI_DATA_WIDTH-27){1'b0}}, ecc_mon_shadow_count};
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x04 : ecc_mon_shadow_count
+              `ECC_REG_SHADOW_COUNT: begin
+                axi_rdata_d = {{(AXI_DATA_WIDTH-27){1'b0}}, ecc_mon_shadow_count};
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // 0x08 : ecc_mon_shadow_thresh
-            `ECC_REG_SHADOW_THRESH: begin
-              axi_rdata_d = {{(AXI_DATA_WIDTH-5){1'b0}}, ecc_mon_shadow_thresh};
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x08 : ecc_mon_shadow_thresh
+              `ECC_REG_SHADOW_THRESH: begin
+                axi_rdata_d = {{(AXI_DATA_WIDTH-5){1'b0}}, ecc_mon_shadow_thresh};
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // 0x0C : ecc_mon_event — W1C, always reads 0
-            `ECC_REG_EVENT: begin
-              axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x0C : ecc_mon_event — W1C, always reads 0
+              `ECC_REG_EVENT: begin
+                axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // 0x10 : ecc_mon_suspect_addr (RO)
-            `ECC_REG_SUSPECT_ADDR: begin
-              axi_rdata_d = ecc_mon_suspect_addr;
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x10 : ecc_mon_suspect_addr (RO)
+              `ECC_REG_SUSPECT_ADDR: begin
+                axi_rdata_d = ecc_mon_suspect_addr;
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // 0x14 : ecc_mon_status (RO)
-            //   Bit 0 = correctable_seen
-            //   Bit 1 = mbist_correlated
-            `ECC_REG_STATUS: begin
-              axi_rdata_d = {{(AXI_DATA_WIDTH-2){1'b0}},
-                              mbist_correlated,
-                              correctable_seen};
-              axi_rresp_d = `AXIL_ECC_RESP_OKAY;
-            end
+              // 0x14 : ecc_mon_status (RO)
+              //   Bit 0 = correctable_seen
+              //   Bit 1 = mbist_correlated
+              `ECC_REG_STATUS: begin
+                axi_rdata_d = {{(AXI_DATA_WIDTH-2){1'b0}},
+                                mbist_correlated,
+                                correctable_seen};
+                axi_rresp_d = `AXIL_ECC_RESP_OKAY;
+              end
 
-            // All other offsets in the 4 KB window → SLVERR, data = 0
-            default: begin
-              axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
-              axi_rresp_d = `AXIL_ECC_RESP_SLVERR;
-            end
+              // All other offsets in the 4 KB window → SLVERR, data = 0
+              default: begin
+                axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
+                axi_rresp_d = `AXIL_ECC_RESP_SLVERR;
+              end
 
-          endcase
+            endcase
+          end else begin
+            axi_rdata_d = {AXI_DATA_WIDTH{1'b0}};
+            axi_rresp_d = `AXIL_ECC_RESP_SLVERR;
+          end
 
           axi_rid_d    = ar_id_lat;
           axi_rvalid_d = 1'b1;
