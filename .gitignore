@@ -1,2 +1,204 @@
-*.swp
+<<<<<<< HEAD
+
+
+# --- Synopsys VCS ---
+simv
+simv.daidir/
+simv.vdb/
+csrc/
+ucli.key
+vc_hdrs.h
+AN.DB/
+DVEfiles/
+*.vpd
+*.log
+
+# --- Synopsys Verdi ---
+*.fsdb
+verdiLog/
+VerdiLog/
+novas_autosave.rc
+novas.rc
+novas.conf
+
+# --- Cadence Tools (Xcelium / Virtuoso) ---
+xcelium.d/
+INCA_libs/
+*.shm
+*.trn
+*.cdslck
+=======
+
+# Linux / temporary
 *~
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# VS Code
+.vscode/
+
+# Simulation
+build/
+sim/
+simulation/
+*.vcd
+*.vpd
+*.fsdb
+*.wlf
+*.fst
+*.lxt
+*.lxt2
+*.ghw
+
+# VCS
+simv
+simv.daidir/
+simv.csrc/
+simv.vdb/
+csrc/
+DVEfiles/
+ucli.key
+vc_hdrs.h
+vcs.log
+
+# Icarus Verilog
+*.vvp
+iverilog/
+>>>>>>> 43b2746 (feat: integrated uart,aes and i2c to the axi_interconnect_2x11 and verified using tb_soc)
+
+# --- Generic HDL Simulation Artifacts ---
+obj_dir/
+<<<<<<< HEAD
+*.vcd
+*.fst
+*.lxt
+work/
+transcript
+*.wlf
+
+# --- Python & Cocotb Verification ---
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+env/
+venv/
+
+# --- Xilinx / AMD Vivado ---
+*.Xil/
+*.cache/
+*.hw/
+*.ip_user_files/
+*.gen/
+*.runs/
+*.sim/
+*.bit
+*.mcs
+*.prm
+*.bin
+*.ltx
+*.hwdef
+vivado*.jou
+vivado*.log
+webtalk*.jou
+webtalk*.log
+hs_err_pid*
+
+# --- Intel / Altera Quartus ---
+db/
+incremental_db/
+output_files/
+simulation/
+*.qws
+*.sof
+*.pof
+*.jam
+*.jbc
+
+# --- Build & Output Directories ---
+build/
+dist/
+bin/
+out/
+
+# --- Software Test / RISC-V Toolchain Binaries ---
+*.elf
+*.hex
+*.disasm
+
+# --- OS & IDE Files ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+=======
+*.vlt
+
+# ModelSim / Questa
+work/
+transcript
+vsim.wlf
+*.ucdb
+modelsim.ini
+
+# Vivado
+.Xil/
+.cache/
+.hw/
+.ip_user_files/
+.sim/
+.gen/
+*.jou
+*.str
+*.wdb
+
+# Synthesis / implementation
+synth/
+synthesis/
+implementation/
+impl/
+reports/
+netlist/
+netlists/
+
+# Generated FPGA files
+*.bit
+*.bin
+*.ltx
+*.mmi
+*.xsa
+*.hdf
+
+# Simulation logs
+*.log
+*.out
+*.transcript
+
+# Coverage
+coverage/
+cov/
+
+# Project-specific simulation build
+run/build/
+run/*.vcd
+run/*.vpd
+run/*.fsdb
+run/*.wlf
+run/*.log
+run/*.out
+run/simv
+run/simv.daidir/
+run/csrc/
+run/DVEfiles/
+run/obj_dir/
+
+# OS files
+.DS_Store
+Thumbs.db
+>>>>>>> 43b2746 (feat: integrated uart,aes and i2c to the axi_interconnect_2x11 and verified using tb_soc)
+
