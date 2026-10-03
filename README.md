@@ -82,7 +82,7 @@ Full signal lists, register maps, and address-decode rules are in the [project d
 ├── docs/                 # Architecture, memory map, verification plan
 └── README.md
 ```
-*(Adjust to match your actual repo layout.)*
+
 
 ## Status
 
