@@ -87,9 +87,9 @@ Base address: **`0x4000_3000`**, Window: **4 KB** (`0x4000_3000` – `0x4000_3FF
 | Offset | Word Index | Register Name | Access | Reset | Description |
 |---|---|---|---|---|---|
 | `0x000` | `4'h0` | `mbist_start` | W | — | Write `1` to trigger self-test. Auto-clearing pulse. |
-| `0x004` | `4'h1` | `mbist_algo_sel` | R/W | `2'b01` | Algorithm select: `2'b00` = Checkerboard, `2'b01` = March C-. |
+| `0x004` | `4'h1` | `mbist_algo_sel` | R/W | `2'b01` | Algorithm select: `2'b00` = Checkerboard, `2'b01` = March C-. **Defaults to March C- (intentional)** — provides full stuck-at / transition / coupling coverage; the System Timer can auto-trigger before firmware runs, so the power-on default is the more thorough algorithm. |
 | `0x008` | `4'h2` | `mbist_addr_start` | R/W | `0x0008_0000` | Start address of DCCM region to test (64-bit aligned). |
-| `0x00C` | `4'h3` | `mbist_addr_end` | R/W | `0x0009_FFF8` | End address of DCCM region to test (inclusive, 64-bit aligned). |
+| `0x00C` | `4'h3` | `mbist_addr_end` | R/W | `0x0008_3FF8` | End address of DCCM region to test (inclusive, 64-bit aligned). Sized for the 16 KB simulation DCCM (`0x0008_0000`–`0x0008_3FFF`). |
 | `0x010` | `4'h4` | `mbist_busy` | RO | `0x0` | Set while self-test scan is running. |
 | `0x014` | `4'h5` | `mbist_done` | RO / W1C | `0x0` | Set when scan completes. Cleared on new start or writing `1`. |
 | `0x018` | `4'h6` | `mbist_pass_fail` | RO | `0x0` | `0` = PASS, `1` = Directly-detected fault present. |
@@ -113,11 +113,16 @@ Base address: **`0x4000_3000`**, Window: **4 KB** (`0x4000_3000` – `0x4000_3FF
 
 ### 1. Software Configuration & Launch
 ```c
-// Configure test bounds: DCCM 128 KB (0x0008_0000 to 0x0009_FFF8)
-*(volatile uint32_t *)(0x40003008) = 0x00080000;
-*(volatile uint32_t *)(0x4000300C) = 0x0009FFF8;
+// Configure test bounds for 16 KB simulation DCCM (0x0008_0000–0x0008_3FFF).
+// These match the RTL power-on defaults; explicit writes are still recommended
+// in boot firmware to be self-documenting and robust to future default changes.
+*(volatile uint32_t *)(0x40003008) = 0x00080000;  // mbist_addr_start
+*(volatile uint32_t *)(0x4000300C) = 0x00083FF8;  // mbist_addr_end (64-bit aligned)
 
-// Select March C- algorithm
+// Select algorithm: 0x1 = March C- (default), 0x0 = Checkerboard.
+// March C- is the power-on default because the System Timer can auto-trigger
+// a scan before this boot code runs. Override here only if a faster
+// Checkerboard sweep is preferred for routine background polling.
 *(volatile uint32_t *)(0x40003004) = 0x1;
 
 // Trigger self-test
@@ -150,4 +155,4 @@ Base address: **`0x4000_3000`**, Window: **4 KB** (`0x4000_3000` – `0x4000_3FF
 
 ---
 
-*Document revision: 1.0 — 2026-10-02*
+*Document revision: 1.1 — 2026-10-03 — mbist\_addr\_end reset corrected to 16 KB DCCM (0x0008\_3FF8); March C- power-on default confirmed intentional; firmware example updated.*
