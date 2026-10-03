@@ -178,6 +178,7 @@ netlists/
 *.log
 *.out
 *.transcript
+*.f
 
 # Coverage
 coverage/
