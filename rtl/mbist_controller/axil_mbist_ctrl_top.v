@@ -351,9 +351,14 @@ module axil_mbist_ctrl_top #
       aw_wstrb_lat     <= 4'h0;
       aw_done          <= 1'b0;
       w_done           <= 1'b0;
-      mbist_algo_sel   <= `MBIST_ALGO_MARCH_C; // default to March C-
-      mbist_addr_start <= 32'h0008_0000;       // default DCCM base
-      mbist_addr_end   <= 32'h0009_FFF8;       // default 128 KB DCCM end
+      // March C- is intentionally chosen as the power-on default (over Checkerboard)
+      // because it provides production-grade coverage of stuck-at, transition,
+      // address-decoder, and coupling faults at the cost of 10N operations vs 4N.
+      // The System Timer can auto-trigger a scan before firmware runs, so the
+      // default algorithm should be the most thorough one available.
+      mbist_algo_sel   <= `MBIST_ALGO_MARCH_C; // intentional: March C- > Checkerboard coverage
+      mbist_addr_start <= 32'h0008_0000;        // DCCM base (fixed)
+      mbist_addr_end   <= 32'h0008_3FF8;        // 16 KB DCCM end (0x0008_0000 + 0x4000 - 8)
       mbist_done_lat   <= 1'b0;
     end else begin
       wr_state         <= wr_state_d;
