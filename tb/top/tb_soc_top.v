@@ -309,15 +309,15 @@ module tb_soc_top;
   wire [3:0]                  m04_awqos;
   wire [3:0]                  m04_awregion;
   wire                        m04_awvalid;
-  reg                         m04_awready;   // driven by MBIST ctrl inside DUT
+  wire                        m04_awready;   // driven by MBIST ctrl inside DUT
   wire [XBAR_DATA_WIDTH-1:0]  m04_wdata;
   wire [XBAR_STRB_WIDTH-1:0]  m04_wstrb;
   wire                        m04_wlast;
   wire                        m04_wvalid;
-  reg                         m04_wready;
-  reg  [XBAR_ID_WIDTH-1:0]    m04_bid;
-  reg  [1:0]                  m04_bresp;
-  reg                         m04_bvalid;
+  wire                        m04_wready;
+  wire [XBAR_ID_WIDTH-1:0]    m04_bid;
+  wire [1:0]                  m04_bresp;
+  wire                        m04_bvalid;
   wire                        m04_bready;
   wire [XBAR_ID_WIDTH-1:0]    m04_arid;
   wire [XBAR_ADDR_WIDTH-1:0]  m04_araddr;
@@ -330,12 +330,12 @@ module tb_soc_top;
   wire [3:0]                  m04_arqos;
   wire [3:0]                  m04_arregion;
   wire                        m04_arvalid;
-  reg                         m04_arready;
-  reg  [XBAR_ID_WIDTH-1:0]    m04_rid;
-  reg  [XBAR_DATA_WIDTH-1:0]  m04_rdata;
-  reg  [1:0]                  m04_rresp;
-  reg                         m04_rlast;
-  reg                         m04_rvalid;
+  wire                        m04_arready;
+  wire [XBAR_ID_WIDTH-1:0]    m04_rid;
+  wire [XBAR_DATA_WIDTH-1:0]  m04_rdata;
+  wire [1:0]                  m04_rresp;
+  wire                        m04_rlast;
+  wire                        m04_rvalid;
   wire                        m04_rready;
 
   // ── m05 ECC Monitor ───────────────────────────────────────────────────────
@@ -423,7 +423,7 @@ module tb_soc_top;
   // ── MBIST / Timer sideband ────────────────────────────────────────────────
   wire         mbist_active;
   wire [31:0]  mbist_fault_addr_tap;
-  reg          mbist_irq_done;
+  wire         mbist_irq_done;
   reg          wdg_irq_pretimeout;
   reg          timer_tick;
 
@@ -448,9 +448,8 @@ module tb_soc_top;
   wire jtag_tdo;
   wire jtag_tdoEn;
 
-  // Tie off DMI / MBIST irq / pretimeout / timer tick
+  // Tie off DMI / pretimeout / timer tick
   initial begin
-    mbist_irq_done     = 1'b0;
     wdg_irq_pretimeout = 1'b0;
     timer_tick         = 1'b0;
     dmi_core_enable    = 1'b0;
@@ -479,13 +478,6 @@ module tb_soc_top;
     m03_bid = 0; m03_bresp = `AXI_RESP_OKAY;
     m03_arready = 1'b1; m03_rvalid = 1'b0;
     m03_rid = 0; m03_rdata = 64'h0; m03_rresp = `AXI_RESP_OKAY; m03_rlast = 1'b1;
-
-    // m04 MBIST CSR stub (MBIST ctrl inside DUT drives its own ready signals,
-    // these initial values are overridden when the DUT is connected)
-    m04_awready = 1'b0; m04_wready = 1'b0; m04_bvalid = 1'b0;
-    m04_bid = 0; m04_bresp = `AXI_RESP_OKAY;
-    m04_arready = 1'b0; m04_rvalid = 1'b0;
-    m04_rid = 0; m04_rdata = 64'h0; m04_rresp = `AXI_RESP_OKAY; m04_rlast = 1'b1;
 
     // m05 ECC Monitor stub
     m05_awready = 1'b1; m05_wready = 1'b1; m05_bvalid = 1'b0;
@@ -582,7 +574,7 @@ module tb_soc_top;
     .jtag_tdo            (jtag_tdo),
     .jtag_tdoEn          (jtag_tdoEn),
 
-    .mbist_irq_done_i    (mbist_irq_done),
+    .mbist_irq_done_o    (mbist_irq_done),
     .wdg_irq_pretimeout_i(wdg_irq_pretimeout),
 
     .dccm_ecc_single_error_o    (dccm_ecc_single_error),
@@ -1289,17 +1281,14 @@ module tb_soc_top;
     $display("[TB] PASS=%0d  FAIL=%0d at timeout", pass_count, fail_count);
     $finish;
   end
-initial begin
-    $readmemh("mbist.hex", iccm_mem_array);
-end
   // ==========================================================================
-  // ── VCD / waveform dump
+  // ── Waveform dump
   // ==========================================================================
- initial begin
-    $fsdbDumpfile("dump.fsdb");  // Record the waveform, waveform name testname.fsdb
-    $fsdbDumpvars("+all");    // + all parameters, Struct structures in Dump SV
-    $fsdbDumpSVA();      // Present the result of Assertion in FSDB
-    $fsdbDumpMDA(); 
-  en
+  initial begin
+    $fsdbDumpfile("dump.fsdb");
+    $fsdbDumpvars("+all");
+    $fsdbDumpSVA();
+    $fsdbDumpMDA();
+  end
 
 endmodule

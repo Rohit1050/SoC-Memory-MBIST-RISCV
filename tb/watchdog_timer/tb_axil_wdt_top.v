@@ -382,7 +382,7 @@ module tb_axil_wdt_top;
     if (wdg_irq_pretimeout == 1'b1) begin
       $display("[PASS] TC09: wdg_irq_pretimeout asserted in pretimeout window");
     end else begin
-      $display("[FAIL] TC09: wdg_irq_pretimeout failed to assert! Count: %0d", dut.wdg_count);
+      $display("[FAIL] TC09: wdg_irq_pretimeout failed to assert! Count: %0d", dut.wdg_count_w);
       test_errors = test_errors + 1;
     end
 

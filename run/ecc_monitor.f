@@ -1,8 +1,9 @@
-
-
-// Tool    : VCS       -> vcs -file ecc_monitor.f -sverilog
-//           ModelSim  -> vlog -f ecc_monitor.f
-//           Verilator -> verilator -f ecc_monitor.f --binary --top-module tb_axil_ecc_monitor_top
+// =============================================================================
+// Runfile : run/ecc_monitor.f
+// IP      : ECC Monitor (axil_ecc_monitor_top)
+// Tool    : VCS       -> vcs -full64 -sverilog -file run/ecc_monitor.f
+//           ModelSim  -> vlog -f run/ecc_monitor.f
+//           Verilator -> verilator -f run/ecc_monitor.f --binary --top-module tb_axil_ecc_monitor_top
 // =============================================================================
 
 // ---- Compiler flags ----------------------------------------------------------
@@ -10,19 +11,12 @@
 +define+ECC_MON_STANDALONE
 
 // ---- Include search paths ----------------------------------------------------
-// RTL package / defines header
 +incdir+${PRJ_DIR}/rtl/ecc_monitor
-// Common TB BFM
 +incdir+${PRJ_DIR}/tb/common
 
-// ---- RTL sources (bottom-up order) -------------------------------------------
-// ECC Monitor is a single-file IP (no sub-modules)
+// ---- RTL sources -------------------------------------------------------------
 ${PRJ_DIR}/rtl/ecc_monitor/axil_ecc_monitor_top.v
 
 // ---- Testbench ---------------------------------------------------------------
-// NOTE: tb_axil_ecc_monitor_top.v `include's axil_bfm_master.v with a repo-root
-// relative path. List it here so Verilator sees it as a standalone compile unit; 
-// ModelSim/VCS `include will find it via +incdir above.
-${PRJ_DIR}/tb/common/axil_bfm_master.v
-
+// NOTE: tb_axil_ecc_monitor_top.v `includes axil_bfm_master.v via +incdir.
 ${PRJ_DIR}/tb/ecc_monitor/tb_axil_ecc_monitor_top.v

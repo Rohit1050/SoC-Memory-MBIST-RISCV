@@ -108,7 +108,7 @@ import el2_pkg::*;
   // ===========================================================================
   // Interrupt inputs from peripherals (only two are live today)
   // ===========================================================================
-  input  logic                          mbist_irq_done_i,      // from axil_mbist_ctrl_top
+  output logic                          mbist_irq_done_o,      // from axil_mbist_ctrl_top
   input  logic                          wdg_irq_pretimeout_i,  // from axil_wdt_top
 
   // ===========================================================================
@@ -261,15 +261,15 @@ import el2_pkg::*;
   output logic [3:0]                    m04_axi_awqos,
   output logic [3:0]                    m04_axi_awregion,
   output logic                          m04_axi_awvalid,
-  input  logic                          m04_axi_awready,
+  output logic                          m04_axi_awready,
   output logic [XBAR_DATA_WIDTH-1:0]    m04_axi_wdata,
   output logic [XBAR_STRB_WIDTH-1:0]    m04_axi_wstrb,
   output logic                          m04_axi_wlast,
   output logic                          m04_axi_wvalid,
-  input  logic                          m04_axi_wready,
-  input  logic [XBAR_ID_WIDTH-1:0]      m04_axi_bid,
-  input  logic [1:0]                    m04_axi_bresp,
-  input  logic                          m04_axi_bvalid,
+  output logic                          m04_axi_wready,
+  output logic [XBAR_ID_WIDTH-1:0]      m04_axi_bid,
+  output logic [1:0]                    m04_axi_bresp,
+  output logic                          m04_axi_bvalid,
   output logic                          m04_axi_bready,
   output logic [XBAR_ID_WIDTH-1:0]      m04_axi_arid,
   output logic [XBAR_ADDR_WIDTH-1:0]    m04_axi_araddr,
@@ -282,12 +282,12 @@ import el2_pkg::*;
   output logic [3:0]                    m04_axi_arqos,
   output logic [3:0]                    m04_axi_arregion,
   output logic                          m04_axi_arvalid,
-  input  logic                          m04_axi_arready,
-  input  logic [XBAR_ID_WIDTH-1:0]      m04_axi_rid,
-  input  logic [XBAR_DATA_WIDTH-1:0]    m04_axi_rdata,
-  input  logic [1:0]                    m04_axi_rresp,
-  input  logic                          m04_axi_rlast,
-  input  logic                          m04_axi_rvalid,
+  output logic                          m04_axi_arready,
+  output logic [XBAR_ID_WIDTH-1:0]      m04_axi_rid,
+  output logic [XBAR_DATA_WIDTH-1:0]    m04_axi_rdata,
+  output logic [1:0]                    m04_axi_rresp,
+  output logic                          m04_axi_rlast,
+  output logic                          m04_axi_rvalid,
   output logic                          m04_axi_rready,
 
   // m05 — ECC Monitor (0x4000_4000)
@@ -616,18 +616,21 @@ import el2_pkg::*;
   // them. The actual SRAM macro instantiations belong in a future memory
   // subsystem file — the interfaces are exposed here as module-level objects.
   // ===========================================================================
-  el2_mem_if  #(`include "el2_param.vh") el2_mem_export  ();
-  el2_mem_if  #(`include "el2_param.vh") el2_icache_export();
+  el2_mem_if  el2_mem_export  ();
+  el2_mem_if  el2_icache_export();
 
   // ===========================================================================
   // ─── Interrupt vector assembly ───────────────────────────────────────────────
   // PIC_TOTAL_INT = 31 → extintsrc_req[31:1]
   // ===========================================================================
   logic [PIC_TOTAL_INT:1] extintsrc_req;
+  logic                   mbist_irq_done_w;
+
+  assign mbist_irq_done_o = mbist_irq_done_w;
 
   always_comb begin
     extintsrc_req                    = '0;  // default: all inactive
-    extintsrc_req[1]                 = mbist_irq_done_i;       // MBIST done
+    extintsrc_req[1]                 = mbist_irq_done_w;       // MBIST done
     extintsrc_req[2]                 = wdg_irq_pretimeout_i;   // WDT early-warning
     // Bits 3-5 reserved for future peripheral interrupts (see RESERVATION TABLE)
     // Bits 6-31: reserved, tied 0
@@ -638,11 +641,7 @@ import el2_pkg::*;
   // ─── el2_veer_wrapper instantiation ─────────────────────────────────────────
   // File : rtl/Cores-VeeR-EL2/Cores-VeeR-EL2/design/el2_veer_wrapper.sv
   // ===========================================================================
-  el2_veer_wrapper
-  `ifndef RV_SYNTHESIS
-    #(`include "el2_param.vh")
-  `endif
-  u_veer_core (
+  el2_veer_wrapper u_veer_core (
     // ─── STEP 6: Clock, resets, clock enables ──────────────────────────────
     .clk             (clk_i),
     .rst_l           (rst_l_i),
@@ -956,7 +955,7 @@ import el2_pkg::*;
     // ─── Sideband outputs ────────────────────────────────────────────────
     .mbist_active_o         (mbist_active_o),
     .mbist_fault_addr_tap_o (mbist_fault_addr_tap_o),
-    .mbist_irq_done_o       (mbist_irq_done_i),   // loops back to extintsrc_req[1]
+    .mbist_irq_done_o       (mbist_irq_done_w),   // loops back to extintsrc_req[1]
 
     // ─── STEP 3: DMA AXI4 master → crossbar slave s03 ────────────────────
     .m_dma_axi_awid     (mbist_m_axi_awid),
