@@ -64,14 +64,29 @@ module iccm_behavioral_model #(
   // A 16 KB ICCM with 4 banks × 1024 words = 4096 total 32-bit words.
   reg [ICCM_DATA_WIDTH-1:0] flat_image [0:ICCM_NUM_BANKS*ICCM_BANK_WORDS-1];
 
+  // ── VeeR EL2 7-bit SECDED ECC parity computation ─────────────────────────
+  function [6:0] riscv_ecc32(input [31:0] data);
+    reg [6:0] synd;
+    begin
+      synd[0] = ^(data & 32'h56aa_ad5b);
+      synd[1] = ^(data & 32'h9b33_366d);
+      synd[2] = ^(data & 32'he3c3_c78e);
+      synd[3] = ^(data & 32'h03fc_07f0);
+      synd[4] = ^(data & 32'h03ff_f800);
+      synd[5] = ^(data & 32'hfc00_0000);
+      synd[6] = ^{data, synd[5:0]};
+      riscv_ecc32 = synd;
+    end
+  endfunction
+
   initial begin : load_firmware
     integer bank_i, word_i, flat_idx;
 
-    // Zero-initialize all banks
+    // Zero-initialize all banks with valid zero ECC
     for (bank_i = 0; bank_i < ICCM_NUM_BANKS; bank_i = bank_i + 1) begin
       for (word_i = 0; word_i < ICCM_BANK_WORDS; word_i = word_i + 1) begin
         data_mem[bank_i][word_i] = {ICCM_DATA_WIDTH{1'b0}};
-        ecc_mem [bank_i][word_i] = {ICCM_ECC_WIDTH{1'b0}};
+        ecc_mem [bank_i][word_i] = riscv_ecc32({ICCM_DATA_WIDTH{1'b0}});
       end
     end
 
@@ -83,12 +98,9 @@ module iccm_behavioral_model #(
         bank_i = flat_idx % ICCM_NUM_BANKS;
         word_i = flat_idx / ICCM_NUM_BANKS;
         data_mem[bank_i][word_i] = flat_image[flat_idx];
-        // ECC bits are zero — core's write path will correct on first DMA write
-        // if the MBIST Controller pre-writes DCCM.  For ICCM (read-only at
-        // runtime), the core recalculates ECC on each fetch internally.
-        ecc_mem [bank_i][word_i] = {ICCM_ECC_WIDTH{1'b0}};
+        ecc_mem [bank_i][word_i] = riscv_ecc32(flat_image[flat_idx]);
       end
-      $display("[ICCM] Loaded firmware from %s", FIRMWARE_FILE);
+      $display("[ICCM] Loaded firmware from %s with ECC generated", FIRMWARE_FILE);
     end else begin
       $display("[ICCM] WARNING: no firmware file specified, ICCM initialized to zero");
     end

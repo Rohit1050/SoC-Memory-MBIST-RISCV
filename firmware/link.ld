@@ -18,11 +18,16 @@ SECTIONS {
 
     .data : {
         . = ALIGN(4);
+        _data_start = .;
         *(.data)
         *(.data.*)
         *(.sdata)
         *(.sdata.*)
+        . = ALIGN(4);
+        _data_end = .;
     } > dccm AT > iccm
+
+    _data_load = LOADADDR(.data);
 
     .bss (NOLOAD) : {
         . = ALIGN(4);

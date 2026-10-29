@@ -83,7 +83,7 @@ static __attribute__((noinline)) void uart_print(const char* str) {
 }
 
 static __attribute__((noinline)) void uart_print_hex(uint32_t val) {
-    const char hex_chars[] = "0123456789ABCDEF";
+    static const char hex_chars[] = "0123456789ABCDEF";
     uart_print("0x");
     for (int i = 7; i >= 0; i--) {
         uart_putc(hex_chars[(val >> (i * 4)) & 0xF]);

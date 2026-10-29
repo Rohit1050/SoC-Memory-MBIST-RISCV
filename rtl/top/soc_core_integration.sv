@@ -687,7 +687,7 @@ import el2_pkg::*;
     // MPC debug halt/run interface: no PMU/MPC in this design
     .mpc_debug_halt_req (1'b0),
     .mpc_debug_run_req  (1'b0),
-    .mpc_reset_run_req  (1'b0),  // run after reset (1=run, 0=halt on reset)
+    .mpc_reset_run_req  (1'b1),  // run after reset (1=run, 0=halt on reset)
 
     // CPU halt/run request from PMU: no PMU in this design
     .i_cpu_halt_req  (1'b0),
@@ -912,42 +912,133 @@ import el2_pkg::*;
   // The CSR AXI4-Lite slave port wires come from crossbar m04_axi_* (after bridge);
   // that bridge connection is part of the next integration pass.
   // ===========================================================================
+  // ─── AXI4 to AXI4-Lite protocol bridge for MBIST CSR (m04) ────────────────
+  wire [3:0]   m04_axil_awid;
+  wire [31:0]  m04_axil_awaddr;
+  wire [2:0]   m04_axil_awprot;
+  wire         m04_axil_awvalid;
+  wire         m04_axil_awready;
+  wire [31:0]  m04_axil_wdata;
+  wire [3:0]   m04_axil_wstrb;
+  wire         m04_axil_wvalid;
+  wire         m04_axil_wready;
+  wire [3:0]   m04_axil_bid;
+  wire [1:0]   m04_axil_bresp;
+  wire         m04_axil_bvalid;
+  wire         m04_axil_bready;
+  wire [3:0]   m04_axil_arid;
+  wire [31:0]  m04_axil_araddr;
+  wire [2:0]   m04_axil_arprot;
+  wire         m04_axil_arvalid;
+  wire         m04_axil_arready;
+  wire [3:0]   m04_axil_rid;
+  wire [31:0]  m04_axil_rdata;
+  wire [1:0]   m04_axil_rresp;
+  wire         m04_axil_rvalid;
+  wire         m04_axil_rready;
+
+  axi4_to_axil_bridge #(
+    .AXI4_DATA_WIDTH (XBAR_DATA_WIDTH), // 64
+    .AXIL_DATA_WIDTH (32),
+    .ADDR_WIDTH      (XBAR_ADDR_WIDTH), // 32
+    .ID_WIDTH        (XBAR_ID_WIDTH)    // 4
+  ) u_bridge_m04 (
+    .clk             (clk_i),
+    .rst_n           (rst_l_i),
+
+    .s_axi_awid      (m04_axi_awid),
+    .s_axi_awaddr    (m04_axi_awaddr),
+    .s_axi_awlen     (m04_axi_awlen),
+    .s_axi_awsize    (m04_axi_awsize),
+    .s_axi_awburst   (m04_axi_awburst),
+    .s_axi_awlock    (m04_axi_awlock),
+    .s_axi_awcache   (m04_axi_awcache),
+    .s_axi_awprot    (m04_axi_awprot),
+    .s_axi_awqos     (m04_axi_awqos),
+    .s_axi_awregion  (m04_axi_awregion),
+    .s_axi_awvalid   (m04_axi_awvalid),
+    .s_axi_awready   (m04_axi_awready),
+    .s_axi_wdata     (m04_axi_wdata),
+    .s_axi_wstrb     (m04_axi_wstrb),
+    .s_axi_wlast     (m04_axi_wlast),
+    .s_axi_wvalid    (m04_axi_wvalid),
+    .s_axi_wready    (m04_axi_wready),
+    .s_axi_bid       (m04_axi_bid),
+    .s_axi_bresp     (m04_axi_bresp),
+    .s_axi_bvalid    (m04_axi_bvalid),
+    .s_axi_bready    (m04_axi_bready),
+    .s_axi_arid      (m04_axi_arid),
+    .s_axi_araddr    (m04_axi_araddr),
+    .s_axi_arlen     (m04_axi_arlen),
+    .s_axi_arsize    (m04_axi_arsize),
+    .s_axi_arburst   (m04_axi_arburst),
+    .s_axi_arlock    (m04_axi_arlock),
+    .s_axi_arcache   (m04_axi_arcache),
+    .s_axi_arprot    (m04_axi_arprot),
+    .s_axi_arqos     (m04_axi_arqos),
+    .s_axi_arregion  (m04_axi_arregion),
+    .s_axi_arvalid   (m04_axi_arvalid),
+    .s_axi_arready   (m04_axi_arready),
+    .s_axi_rid       (m04_axi_rid),
+    .s_axi_rdata     (m04_axi_rdata),
+    .s_axi_rresp     (m04_axi_rresp),
+    .s_axi_rlast     (m04_axi_rlast),
+    .s_axi_rvalid    (m04_axi_rvalid),
+    .s_axi_rready    (m04_axi_rready),
+
+    .m_axil_awid     (m04_axil_awid),
+    .m_axil_awaddr   (m04_axil_awaddr),
+    .m_axil_awprot   (m04_axil_awprot),
+    .m_axil_awvalid  (m04_axil_awvalid),
+    .m_axil_awready  (m04_axil_awready),
+    .m_axil_wdata    (m04_axil_wdata),
+    .m_axil_wstrb    (m04_axil_wstrb),
+    .m_axil_wvalid   (m04_axil_wvalid),
+    .m_axil_wready   (m04_axil_wready),
+    .m_axil_bid      (m04_axil_bid),
+    .m_axil_bresp    (m04_axil_bresp),
+    .m_axil_bvalid   (m04_axil_bvalid),
+    .m_axil_bready   (m04_axil_bready),
+    .m_axil_arid     (m04_axil_arid),
+    .m_axil_araddr   (m04_axil_araddr),
+    .m_axil_arprot   (m04_axil_arprot),
+    .m_axil_arvalid  (m04_axil_arvalid),
+    .m_axil_arready  (m04_axil_arready),
+    .m_axil_rid      (m04_axil_rid),
+    .m_axil_rdata    (m04_axil_rdata),
+    .m_axil_rresp    (m04_axil_rresp),
+    .m_axil_rvalid   (m04_axil_rvalid),
+    .m_axil_rready   (m04_axil_rready)
+  );
+
   axil_mbist_ctrl_top u_mbist_ctrl (
     .axi_aclk_i    (clk_i),
     .axi_aresetn_i (rst_l_i),
 
-    // ─── CSR AXI4-Lite slave (from crossbar m04 via bridge) ──────────────
-    // These are connected here but the bridge itself is wired in the next pass.
-    // Temporarily the CSR slave receives its signals from m04_axi_* module ports
-    // which will be driven by the AXI4-to-AXI4-Lite bridge in the next step.
-    // For now the wire stubs are present; the tool will warn about undriven
-    // inputs which will be resolved when the bridge is wired.
-    //
-    // NOTE: the bridge Lite-side has ID signals; the MBIST top was designed
-    // to accept them.  The connection matches exactly — no width change needed.
-    .axi_awid_i    (m04_axi_awid   [3:0]),  // bridge drives these
-    .axi_awaddr_i  (m04_axi_awaddr ),
-    .axi_awprot_i  (3'b000         ),        // prot tied: bridge doesn't use it
-    .axi_awvalid_i (m04_axi_awvalid),
-    .axi_awready_o (m04_axi_awready),        // NOTE: this drives the crossbar port
-    .axi_wdata_i   (m04_axi_wdata  [31:0]),  // bridge down-converts 64→32
-    .axi_wstrb_i   (m04_axi_wstrb  [3:0]),
-    .axi_wvalid_i  (m04_axi_wvalid ),
-    .axi_wready_o  (m04_axi_wready ),
-    .axi_bid_o     (m04_axi_bid    ),
-    .axi_bresp_o   (m04_axi_bresp  ),
-    .axi_bvalid_o  (m04_axi_bvalid ),
-    .axi_bready_i  (m04_axi_bready ),
-    .axi_arid_i    (m04_axi_arid   [3:0]),
-    .axi_araddr_i  (m04_axi_araddr ),
-    .axi_arprot_i  (3'b000         ),
-    .axi_arvalid_i (m04_axi_arvalid),
-    .axi_arready_o (m04_axi_arready),
-    .axi_rid_o     (m04_axi_rid    ),
-    .axi_rdata_o   (m04_axi_rdata  [31:0]),
-    .axi_rresp_o   (m04_axi_rresp  ),
-    .axi_rvalid_o  (m04_axi_rvalid ),
-    .axi_rready_i  (m04_axi_rready ),
+    // ─── CSR AXI4-Lite slave (from crossbar m04 via u_bridge_m04) ───────
+    .axi_awid_i    (m04_axil_awid),
+    .axi_awaddr_i  (m04_axil_awaddr),
+    .axi_awprot_i  (m04_axil_awprot),
+    .axi_awvalid_i (m04_axil_awvalid),
+    .axi_awready_o (m04_axil_awready),
+    .axi_wdata_i   (m04_axil_wdata),
+    .axi_wstrb_i   (m04_axil_wstrb),
+    .axi_wvalid_i  (m04_axil_wvalid),
+    .axi_wready_o  (m04_axil_wready),
+    .axi_bid_o     (m04_axil_bid),
+    .axi_bresp_o   (m04_axil_bresp),
+    .axi_bvalid_o  (m04_axil_bvalid),
+    .axi_bready_i  (m04_axil_bready),
+    .axi_arid_i    (m04_axil_arid),
+    .axi_araddr_i  (m04_axil_araddr),
+    .axi_arprot_i  (m04_axil_arprot),
+    .axi_arvalid_i (m04_axil_arvalid),
+    .axi_arready_o (m04_axil_arready),
+    .axi_rid_o     (m04_axil_rid),
+    .axi_rdata_o   (m04_axil_rdata),
+    .axi_rresp_o   (m04_axil_rresp),
+    .axi_rvalid_o  (m04_axil_rvalid),
+    .axi_rready_i  (m04_axil_rready),
 
     // ─── System Timer auto-trigger ────────────────────────────────────────
     .timer_tick_i  (timer_tick_i),

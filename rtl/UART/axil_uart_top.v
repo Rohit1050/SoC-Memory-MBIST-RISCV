@@ -207,7 +207,7 @@ module axil_uart_top (
       case (I)
         UART_LSR_THRE:       assign uart_lsr_reg_int[I] = available_write_space_int;
         UART_LSR_TEMT:       assign uart_lsr_reg_int[I] = available_write_space_int;
-        UART_LSR_DATA_READY: assign uart_lsr_reg_int[I] = ~rx_status_int[AXI_FIFO_ADDR] & uart_irq_en_int;
+        UART_LSR_DATA_READY: assign uart_lsr_reg_int[I] = ~rx_status_int[AXI_FIFO_ADDR];
         default:             assign uart_lsr_reg_int[I] = 1'b0;
       endcase
     end
@@ -340,7 +340,7 @@ module axil_uart_top (
         axi_awready_d = 1'b0;
         axi_wready_d  = 1'b0;
 
-        case (aw_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+        case (aw_addr_lat[11 : AXI_LSB_WIDTH])
 
           UART_THR: begin
             if (!uart_dlab_int && !tx_fifo_full_int) begin
@@ -357,8 +357,7 @@ module axil_uart_top (
           end
 
           UART_BAUD_DIVISOR: begin
-            if (uart_dlab_int)
-              baudrate_divisor_int_d = aw_wdata_lat[AXI_DIV_WIDTH-1:0];
+            baudrate_divisor_int_d = aw_wdata_lat[AXI_DIV_WIDTH-1:0];
             axi_bresp_d = `AXIL_RESP_OKAY;
           end
 
@@ -498,7 +497,7 @@ module axil_uart_top (
 
         // Present data as long as master has not yet accepted (or is accepting now)
         if (!axi_rvalid || axi_rready_i) begin
-          case (ar_addr_lat[AXI_ADDR_WIDTH-1 : AXI_LSB_WIDTH])
+          case (ar_addr_lat[11 : AXI_LSB_WIDTH])
 
             UART_RBR: begin
               if (!uart_dlab_int) begin

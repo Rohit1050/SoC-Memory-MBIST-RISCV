@@ -1,5 +1,5 @@
 <<<<<<< HEAD
-
+snpshots/
 
 # --- Synopsys VCS ---
 simv
@@ -126,7 +126,6 @@ out/
 
 # --- Software Test / RISC-V Toolchain Binaries ---
 *.elf
-*.hex
 *.disasm
 
 # --- OS & IDE Files ---
