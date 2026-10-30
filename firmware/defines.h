@@ -204,7 +204,7 @@
 #define RV_INST_ACCESS_MASK7 0xffffffff
 #define RV_PMP_ENTRIES 16
 #ifndef RV_RESET_VEC
-#define RV_RESET_VEC 0x80000000
+#define RV_RESET_VEC 0x00040000  /* ICCM base — matches rst_vec in soc_core_integration.sv */
 #endif
 #define RV_TARGET default
 #define CPU_TOP `RV_TOP.veer

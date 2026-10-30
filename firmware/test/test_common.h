@@ -55,7 +55,11 @@
 #define ALGO_MC 0x1
 
 #define DCCM_BASE 0x00080000
-#define DCCM_END  0x00083FFF
+/* DCCM_END is the last safe MBIST scan address — stops below firmware .data
+ * which link.ld places at 0x0008_2000.  Scanning beyond 0x0008_1FF8
+ * would overwrite live stack and globals.  Full DCCM top is 0x0008_3FFF
+ * but that region belongs to firmware at runtime. */
+#define DCCM_END  0x00081FF8  /* = MB_END — safe MBIST ceiling, below .data at 0x0008_2000 */
 #define MB_START  0x00080000
 #define MB_END    0x00081FF8
 #define MB_SM_END 0x00080078

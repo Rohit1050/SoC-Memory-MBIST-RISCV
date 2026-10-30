@@ -7,7 +7,7 @@ simv.daidir/
 simv.vdb/
 csrc/
 ucli.key
-vc_hdrs.h
+
 AN.DB/
 DVEfiles/
 *.vpd
@@ -17,8 +17,7 @@ DVEfiles/
 *.fsdb
 verdiLog/
 VerdiLog/
-novas_autosave.rc
-novas.rc
+
 novas.conf
 
 # --- Cadence Tools (Xcelium / Virtuoso) ---
@@ -98,7 +97,7 @@ venv/
 *.bit
 *.mcs
 *.prm
-*.bin
+
 *.ltx
 *.hwdef
 vivado*.jou
@@ -125,7 +124,7 @@ bin/
 out/
 
 # --- Software Test / RISC-V Toolchain Binaries ---
-*.elf
+
 *.disasm
 
 # --- OS & IDE Files ---
@@ -167,7 +166,7 @@ netlists/
 
 # Generated FPGA files
 *.bit
-*.bin
+
 *.ltx
 *.mmi
 *.xsa

@@ -3,7 +3,7 @@
       "serialio" : "0xd0580000",
       "consoleio" : "0xd0580000"
    },
-   "reset_vec" : "0x80000000",
+   "reset_vec" : "0x00040000",
    "nmi_vec" : "0x11110000",
    "harts" : 1,
    "store_error_rollback" : "0",
