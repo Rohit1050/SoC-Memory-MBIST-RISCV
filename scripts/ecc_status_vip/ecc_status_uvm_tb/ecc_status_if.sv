@@ -1,0 +1,6 @@
+interface ecc_status_if;
+logic dccm_ecc_single_error_o;
+logic dccm_ecc_double_error_o;
+logic iccm_ecc_single_error_o;
+logic iccm_ecc_double_error_o;
+endinterface

@@ -442,7 +442,7 @@ module tb_soc_top;
   assign iccm_bank_wr_ecc_w  = u_dut.el2_mem_export.iccm_bank_wr_ecc;
   assign u_dut.el2_mem_export.iccm_bank_dout = iccm_bank_dout_w;
   assign u_dut.el2_mem_export.iccm_bank_ecc  = iccm_bank_ecc_w;
-  assign u_dut.el2_mem_export.clk            = clk;
+  // el2_mem_export.clk is driven internally by el2_mem.sv — do not drive here
 
   // ==========================================================================
   // DUT: soc_core_integration
@@ -630,9 +630,11 @@ module tb_soc_top;
   logic [7:0] gpio_out_probe;
   assign gpio_out_probe = 8'h00; // placeholder — wire to DUT gpio_out_o when bridge live
 
-  logic [7:0] gpio_out_prev = 8'hFF;
+  logic [7:0] gpio_out_prev;
   always_ff @(posedge clk) begin
-    if (gpio_out_probe !== gpio_out_prev) begin
+    if (!rst_l)
+      gpio_out_prev <= 8'hFF;
+    else if (gpio_out_probe !== gpio_out_prev) begin
       $display("[GPIO @%0t] Output: 0x%02h  LED[0](PASS)=%0b  LED[1](FAIL)=%0b",
                $time, gpio_out_probe, gpio_out_probe[0], gpio_out_probe[1]);
       gpio_out_prev <= gpio_out_probe;
@@ -936,14 +938,18 @@ module tb_soc_top;
   // ==========================================================================
   initial begin
     if (dump_waves) begin
-      // FSDB (Synopsys Verdi)
+`ifdef FSDB
+      // FSDB (Synopsys Verdi) — compile with +define+FSDB and -P $VERDI_HOME/share/PLI/VCS/LINUX64/novas.tab $VERDI_HOME/share/PLI/VCS/LINUX64/pli.a
       $fsdbDumpfile("dump.fsdb");
       $fsdbDumpvars(0, tb_soc_top);
       $fsdbDumpSVA();
-      // VCD fallback
-      // $dumpfile("dump.vcd");
-      // $dumpvars(0, tb_soc_top);
       $display("[TB] Waveform dump enabled → dump.fsdb");
+`else
+      // VCD fallback (no Verdi required)
+      $dumpfile("dump.vcd");
+      $dumpvars(0, tb_soc_top);
+      $display("[TB] Waveform dump enabled → dump.vcd");
+`endif
     end
   end
 

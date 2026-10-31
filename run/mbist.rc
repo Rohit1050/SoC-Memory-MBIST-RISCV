@@ -1,0 +1,97 @@
+Magic 271485
+Revision Verdi_U-2023.03-SP1
+
+; Window Layout <x> <y> <width> <height> <signalwidth> <valuewidth>
+viewPort 0 25 1600 733 199 127
+
+; File list:
+; openDirFile [-d delimiter] [-s time_offset] [-rf auto_bus_rule_file] path_name file_name
+openDirFile -d / "" "/home/student/Documents/SoC-Memory-MBIST-RISCV/dump.fsdb"
+
+; file time scale:
+; fileTimeScale ### s|ms|us|ns|ps
+
+; signal spacing:
+signalSpacing 5
+
+; windowTimeUnit is used for zoom, cursor & marker
+; waveform viewport range
+zoom 9407581112.641863 9407772706.976004
+cursor 9407670000.000000
+marker 0.000000
+
+; user define markers
+; userMarker time_pos marker_name color linestyle
+; visible top row signal index
+top 0
+; marker line index
+markerPos 13
+
+; event list
+; addEvent event_name event_expression
+; curEvent event_name
+
+
+
+COMPLEX_EVENT_BEGIN
+
+
+COMPLEX_EVENT_END
+
+
+
+; toolbar current search type
+; curSTATUS search_type
+curSTATUS ByChange
+
+
+addGroup "G1"
+activeDirFile "" "/home/student/Documents/SoC-Memory-MBIST-RISCV/dump.fsdb"
+addSignal -h 15 -UNSIGNED -HEX /tb_soc_top/u_dut/dma_axi_araddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope dma_axi_awaddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope dma_axi_rdata[63:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope dma_axi_wdata[63:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope ifu_axi_araddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m04_axi_awaddr[31:0]
+addSignal -h 15 -holdScope mbist_active_o
+addSignal -h 15 -UNSIGNED -HEX -holdScope mbist_fault_addr_tap_o[31:0]
+addSignal -h 15 -holdScope mbist_irq_done_o
+addSignal -h 15 -UNSIGNED -HEX -holdScope m04_axi_araddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m04_axi_wdata[63:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope mbist_m_axi_araddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope mbist_m_axi_rdata[63:0]
+addGroup "G2"
+
+; getSignalForm Scope Hierarchy Status
+; active file of getSignalForm
+activeDirFile "" "/home/student/Documents/SoC-Memory-MBIST-RISCV/dump.fsdb"
+
+GETSIGNALFORM_SCOPE_HIERARCHY_BEGIN
+getSignalForm close
+
+"/axil_ecc_monitor_top"
+"/tb_soc_top"
+"/tb_soc_top/u_dccm"
+"/tb_soc_top/u_dccm/zero_init"
+"/tb_soc_top/u_dut"
+
+SCOPE_LIST_BEGIN
+"/axil_ecc_monitor_top"
+"/tb_soc_top"
+"/tb_soc_top/test_driver"
+"/tb_soc_top/Unnamed_$tb_soc_top_sv_140"
+"/tb_soc_top/u_dut"
+"/tb_soc_top/u_dccm"
+"/tb_soc_top/u_iccm"
+"/ram_be_8192x272"
+"/ram_be_8192x284"
+"/rvdffiee"
+"/rvfindfirst1"
+"/rvfindfirst1hot"
+"/tb_soc_top/u_uart_mon"
+"/tb_soc_top/u_dccm/zero_init"
+SCOPE_LIST_END
+
+GETSIGNALFORM_SCOPE_HIERARCHY_END
+
+

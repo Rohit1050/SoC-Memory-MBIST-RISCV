@@ -1,0 +1,4 @@
+dccm_ecc_single_error_o,output,1
+dccm_ecc_double_error_o,output,1
+iccm_ecc_single_error_o,output,1
+iccm_ecc_double_error_o,output,1

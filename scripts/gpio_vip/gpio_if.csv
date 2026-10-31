@@ -1,0 +1,2 @@
+gpio_out_o,output,8
+gpio_in_i,input,8
